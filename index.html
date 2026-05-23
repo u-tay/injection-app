@@ -219,6 +219,25 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
     <div id="patientContent"></div>
   </div>
 
+  <!-- マスタ管理ページ -->
+  <div id="page-master" class="page">
+    <div class="page-header">
+      <h1>マスタ管理</h1>
+      <p>患者・施設・病院・薬品の編集</p>
+    </div>
+    <div class="tabs" style="flex-wrap:wrap;gap:6px">
+      <button class="tab-btn active" onclick="switchMasterTab('patient')"  id="mtab-patient">患者</button>
+      <button class="tab-btn"        onclick="switchMasterTab('facility')" id="mtab-facility">施設</button>
+      <button class="tab-btn"        onclick="switchMasterTab('hospital')" id="mtab-hospital">病院</button>
+      <button class="tab-btn"        onclick="switchMasterTab('medicine')" id="mtab-medicine">薬品</button>
+      <button class="tab-btn"        onclick="switchMasterTab('prescription')" id="mtab-prescription">処方</button>
+    </div>
+    <div style="padding:12px 12px 0">
+      <button class="btn btn-primary btn-sm" onclick="openAddMasterModal()">＋ 新規追加</button>
+    </div>
+    <div id="masterList" style="padding-bottom:12px"></div>
+  </div>
+
   <!-- 設定ページ -->
   <div id="page-settings" class="page">
     <div class="page-header">
@@ -311,6 +330,10 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
   <button class="nav-btn" onclick="showPage('visit')" id="nav-visit">
     <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
     往診
+  </button>
+  <button class="nav-btn" onclick="showPage('master')" id="nav-master">
+    <svg viewBox="0 0 24 24"><path d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+    マスタ
   </button>
   <button class="nav-btn" onclick="showPage('settings')" id="nav-settings">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
@@ -406,6 +429,21 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
   </div>
 </div>
 
+<!-- マスタ編集モーダル -->
+<div class="modal-overlay" id="masterModal">
+  <div class="modal">
+    <div class="modal-title">
+      <span id="masterModalTitle">マスタ編集</span>
+      <button onclick="closeModal('masterModal')">&#215;</button>
+    </div>
+    <div id="masterModalFields"></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-primary btn-full" onclick="saveMaster()">保存</button>
+      <button class="btn btn-danger btn-sm" id="masterDeleteBtn" onclick="deleteMasterRow()" style="display:none">削除</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -496,8 +534,9 @@ function showPage(page) {
   document.getElementById('page-' + page).classList.add('active');
   var nb = document.getElementById('nav-' + page);
   if (nb) nb.classList.add('active');
-  if (page === 'visit') { loadHospitals(); setDefaultDates(); }
+  if (page === 'visit')    { loadHospitals(); setDefaultDates(); }
   if (page === 'settings') { updateUrlDisplay(); }
+  if (page === 'master')   { loadMasterList(currentMasterTab); }
 }
 
 // 起動時: URLが未設定ならセットアップ画面を表示
@@ -982,6 +1021,235 @@ function renderVisitPlans(plans) {
       + '<div style="font-size:13px">次回予定: <b>' + p.nextVisitDate + '</b></div>'
       + '</div>';
   }).join('');
+}
+
+// ============================================================
+// マスタ管理
+// ============================================================
+var currentMasterTab = 'patient';
+var currentMasterRecord = null; // 編集中レコード（nullなら新規）
+var masterCache = {}; // {facility:[...], hospital:[...]} キャッシュ
+
+var MASTER_DEF = {
+  patient: {
+    label: '患者',
+    fields: [
+      { key: '患者ID',                         label: '患者ID',         type: 'text',   required: true,  readonly: 'edit' },
+      { key: '氏名',                            label: '氏名',           type: 'text',   required: true  },
+      { key: '検索用ID（6桁、和暦生年月日）',  label: '生年月日コード', type: 'text',   required: false },
+      { key: '病院ID',                          label: '病院',           type: 'select', required: true,  optionSource: 'hospital' },
+    ],
+    rowLabel: function(r) { return r['氏名'] + '　' + (r['_facilityName'] || '') + ' / ' + (r['_hospitalName'] || ''); },
+  },
+  facility: {
+    label: '施設',
+    fields: [
+      { key: '施設ID',   label: '施設ID', type: 'text', required: true, readonly: 'edit' },
+      { key: '施設名',   label: '施設名', type: 'text', required: true },
+    ],
+    rowLabel: function(r) { return r['施設名']; },
+  },
+  hospital: {
+    label: '病院・クリニック',
+    fields: [
+      { key: '病院ID', label: '病院ID', type: 'text',   required: true,  readonly: 'edit' },
+      { key: '病院名', label: '病院名', type: 'text',   required: true  },
+      { key: '施設ID', label: '施設',   type: 'select', required: true,  optionSource: 'facility' },
+    ],
+    rowLabel: function(r) { return r['病院名'] + '　（' + (r['_facilityName'] || r['施設ID']) + '）'; },
+  },
+  medicine: {
+    label: '薬品',
+    fields: [
+      { key: '薬品ID',         label: '薬品ID',       type: 'text',   required: true,  readonly: 'edit' },
+      { key: '薬品名',         label: '薬品名',       type: 'text',   required: true  },
+      { key: '種類',           label: '種類',         type: 'select', required: false, options: ['注射薬', '吸入薬', '経口薬', 'その他'] },
+      { key: '1本容量',        label: '1本容量（単位）', type: 'number', required: false },
+      { key: '開封後有効日数', label: '開封後有効日数（期限なしは999）', type: 'number', required: false },
+    ],
+    rowLabel: function(r) { return r['薬品名'] + '　' + (r['種類'] || '') + '  1本' + (r['1本容量'] || '-') + '単位 / 開封後' + (r['開封後有効日数'] >= 999 ? '期限なし' : (r['開封後有効日数'] || '-') + '日'); },
+  },
+  prescription: {
+    label: '処方',
+    fields: [
+      { key: '処方ID',      label: '処方ID',       type: 'text',   required: true,  readonly: 'edit' },
+      { key: '患者ID',      label: '患者',         type: 'select', required: true,  optionSource: 'patient' },
+      { key: '薬品ID',      label: '薬品',         type: 'select', required: true,  optionSource: 'medicine' },
+      { key: '病院ID',      label: '病院',         type: 'select', required: true,  optionSource: 'hospital' },
+      { key: '確定在庫_単位', label: '現在在庫（単位）', type: 'number', required: false },
+      { key: '1日使用量',   label: '1回使用量（単位）', type: 'number', required: false },
+      { key: '使用頻度',    label: '使用頻度',     type: 'select', required: false, options: ['毎日','週2回','週1回','月1回'] },
+      { key: 'ステータス',  label: 'ステータス',   type: 'select', required: false, options: ['使用中','中止'] },
+      { key: '処方開始日',  label: '処方開始日',   type: 'text',   required: false },
+    ],
+    rowLabel: function(r, cache) {
+      var pName = ''; var mName = '';
+      if (cache && cache.patient)  { var p = cache.patient.find(function(x){ return x['患者ID'] === r['患者ID']; }); if(p) pName = p['氏名']; }
+      if (cache && cache.medicine) { var m = cache.medicine.find(function(x){ return x['薬品ID'] === r['薬品ID']; }); if(m) mName = m['薬品名']; }
+      return (pName || r['患者ID']) + '　' + (mName || r['薬品ID']) + '　' + (r['ステータス'] || '');
+    },
+  },
+};
+
+function switchMasterTab(type) {
+  currentMasterTab = type;
+  document.querySelectorAll('[id^="mtab-"]').forEach(function(b) { b.classList.remove('active'); });
+  document.getElementById('mtab-' + type).classList.add('active');
+  loadMasterList(type);
+}
+
+async function loadMasterList(type) {
+  var el = document.getElementById('masterList');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>読み込み中...</div>';
+  try {
+    var data = await api('getMasters', { type: type });
+    masterCache[type] = data;
+    renderMasterList(type, data);
+  } catch(e) {
+    el.innerHTML = '<div class="card" style="color:red">エラー: ' + e.message + '</div>';
+  }
+}
+
+function renderMasterList(type, data) {
+  var el = document.getElementById('masterList');
+  var def = MASTER_DEF[type];
+  if (!data || !data.length) {
+    el.innerHTML = '<div class="empty-state">データがありません</div>';
+    return;
+  }
+  el.innerHTML = data.map(function(r) {
+    var label = def.rowLabel(r, masterCache);
+    var id = r[getMasterIdKey(type)];
+    return '<div class="card" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="openEditMasterModal(\'' + type + '\',\'' + escapeJs(String(id)) + '\')">'
+      + '<div style="font-size:14px;flex:1">' + escapeHtml(label) + '</div>'
+      + '<div style="font-size:12px;color:var(--gray-400);margin-left:8px">&#9998;</div>'
+      + '</div>';
+  }).join('');
+}
+
+function getMasterIdKey(type) {
+  var keys = { patient:'患者ID', facility:'施設ID', hospital:'病院ID', medicine:'薬品ID', prescription:'処方ID' };
+  return keys[type] || 'ID';
+}
+
+function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escapeJs(s)   { return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
+async function openAddMasterModal() {
+  currentMasterRecord = null;
+  document.getElementById('masterModalTitle').textContent = MASTER_DEF[currentMasterTab].label + ' 新規追加';
+  document.getElementById('masterDeleteBtn').style.display = 'none';
+  await renderMasterFields(currentMasterTab, null);
+  openModal('masterModal');
+}
+
+async function openEditMasterModal(type, id) {
+  var cached = masterCache[type] || [];
+  var idKey  = getMasterIdKey(type);
+  var record = cached.find(function(r) { return String(r[idKey]) === String(id); });
+  currentMasterRecord = record || null;
+  document.getElementById('masterModalTitle').textContent = MASTER_DEF[type].label + ' 編集';
+  document.getElementById('masterDeleteBtn').style.display = '';
+  await renderMasterFields(type, record);
+  openModal('masterModal');
+}
+
+async function renderMasterFields(type, record) {
+  var def = MASTER_DEF[type];
+  var html = '';
+  for (var i = 0; i < def.fields.length; i++) {
+    var f = def.fields[i];
+    var val = record ? (record[f.key] !== undefined ? record[f.key] : '') : '';
+    var isReadonly = f.readonly === 'edit' && record;
+    html += '<div class="form-group"><label>' + f.label + (f.required ? ' *' : '') + '</label>';
+
+    if (isReadonly) {
+      html += '<input type="text" value="' + escapeHtml(String(val)) + '" readonly style="background:#f5f7fa;color:#9aa5b4">';
+    } else if (f.type === 'select') {
+      html += '<select id="mf_' + f.key + '">';
+      html += '<option value="">選択してください</option>';
+      if (f.options) {
+        f.options.forEach(function(o) {
+          html += '<option value="' + escapeHtml(o) + '"' + (String(val) === o ? ' selected' : '') + '>' + escapeHtml(o) + '</option>';
+        });
+      } else if (f.optionSource) {
+        // キャッシュから選択肢を生成
+        var srcData = masterCache[f.optionSource] || await loadMasterForSelect(f.optionSource);
+        var srcDef  = MASTER_DEF[f.optionSource];
+        var srcIdKey = getMasterIdKey(f.optionSource);
+        srcData.forEach(function(s) {
+          var optLabel = srcDef.rowLabel(s, masterCache);
+          var optVal   = s[srcIdKey];
+          html += '<option value="' + escapeHtml(String(optVal)) + '"' + (String(val) === String(optVal) ? ' selected' : '') + '>' + escapeHtml(optLabel) + '</option>';
+        });
+      }
+      html += '</select>';
+    } else {
+      html += '<input type="' + (f.type === 'number' ? 'number' : 'text') + '" id="mf_' + f.key + '" value="' + escapeHtml(String(val)) + '"' + (f.type === 'number' ? ' step="any"' : '') + '>';
+    }
+    html += '</div>';
+  }
+  document.getElementById('masterModalFields').innerHTML = html;
+}
+
+async function loadMasterForSelect(type) {
+  try {
+    var data = await api('getMasters', { type: type });
+    masterCache[type] = data;
+    return data;
+  } catch(e) { return []; }
+}
+
+async function saveMaster() {
+  var def    = MASTER_DEF[currentMasterTab];
+  var idKey  = getMasterIdKey(currentMasterTab);
+  var record = {};
+  var valid  = true;
+
+  def.fields.forEach(function(f) {
+    var el = document.getElementById('mf_' + f.key);
+    if (!el) {
+      // readonlyフィールド → 既存レコードの値をそのまま使用
+      if (currentMasterRecord) record[f.key] = currentMasterRecord[f.key] || '';
+      return;
+    }
+    var val = el.value.trim();
+    if (f.required && !val) { toast(f.label + ' は必須です'); valid = false; }
+    if (f.type === 'number' && val) val = parseFloat(val);
+    record[f.key] = val;
+  });
+  if (!valid) return;
+
+  try {
+    if (currentMasterRecord) {
+      // 更新
+      await api('updateMaster', null, { type: currentMasterTab, id: currentMasterRecord[idKey], record: record });
+      toast('✓ 更新しました');
+    } else {
+      // 新規
+      await api('addMaster', null, { type: currentMasterTab, record: record });
+      toast('✓ 追加しました');
+    }
+    closeModal('masterModal');
+    loadMasterList(currentMasterTab);
+  } catch(e) {
+    toast('エラー: ' + e.message);
+  }
+}
+
+async function deleteMasterRow() {
+  if (!currentMasterRecord) return;
+  var idKey = getMasterIdKey(currentMasterTab);
+  var id    = currentMasterRecord[idKey];
+  if (!confirm('「' + MASTER_DEF[currentMasterTab].rowLabel(currentMasterRecord, masterCache) + '」を削除しますか？\n※この操作は元に戻せません')) return;
+  try {
+    await api('deleteMaster', null, { type: currentMasterTab, id: id });
+    toast('✓ 削除しました');
+    closeModal('masterModal');
+    loadMasterList(currentMasterTab);
+  } catch(e) {
+    toast('エラー: ' + e.message);
+  }
 }
 
 // ============================================================
