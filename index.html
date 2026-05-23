@@ -422,6 +422,32 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
   </div>
 </div>
 
+<!-- 往診本数変更モーダル -->
+<div class="modal-overlay" id="visitEditModal">
+  <div class="modal" style="max-height:85vh;display:flex;flex-direction:column">
+    <div class="modal-title" style="flex-shrink:0">
+      <span>本数変更</span>
+      <button onclick="closeModal('visitEditModal')">&#215;</button>
+    </div>
+    <div id="visitEditBody" style="overflow-y:auto;flex:1;padding-bottom:8px"></div>
+    <div style="padding:12px 0 0;flex-shrink:0;display:flex;gap:8px">
+      <button class="btn btn-outline btn-sm" onclick="closeModal('visitEditModal')" style="flex:1">キャンセル</button>
+      <button class="btn btn-primary btn-sm" onclick="applyVisitBottleEdits()" style="flex:1">変更を適用</button>
+    </div>
+  </div>
+</div>
+
+<!-- 往診予定詳細モーダル -->
+<div class="modal-overlay" id="visitPlanDetailModal">
+  <div class="modal" style="max-height:85vh;display:flex;flex-direction:column">
+    <div class="modal-title" style="flex-shrink:0">
+      <span id="visitPlanDetailTitle">往診詳細</span>
+      <button onclick="closeModal('visitPlanDetailModal')">&#215;</button>
+    </div>
+    <div id="visitPlanDetailBody" style="overflow-y:auto;flex:1;padding-bottom:8px"></div>
+  </div>
+</div>
+
 <!-- 履歴モーダル -->
 <div class="modal-overlay" id="historyModal">
   <div class="modal">
@@ -544,11 +570,32 @@ function showPage(page) {
 }
 
 // 起動時: URLが未設定ならセットアップ画面を表示
+// QRコードからのアクセス時: URLパラメータがあれば往診計算を自動実行
 window.addEventListener('DOMContentLoaded', function() {
   if (!getGasUrl()) {
     document.getElementById('setupOverlay').classList.add('open');
   } else {
     updateUrlDisplay();
+    // QRコードアクセス: ?hospital=...&visitDate=...&nextVisitDate=...
+    var params = new URLSearchParams(location.search);
+    var qrHospital   = params.get('hospital');
+    var qrVisitDate  = params.get('visitDate');
+    var qrNextVisit  = params.get('nextVisitDate');
+    if (qrHospital && qrVisitDate && qrNextVisit) {
+      // 往診タブに切り替えてから計算
+      showPage('visit');
+      loadHospitals().then(function() {
+        switchVisitTab('calc');
+        var sel = document.getElementById('visitHospital');
+        // 選択肢にhospitalIdをセット
+        Array.from(sel.options).forEach(function(opt) {
+          if (opt.value === qrHospital) opt.selected = true;
+        });
+        document.getElementById('visitDate').value     = qrVisitDate.replace(/\//g, '-');
+        document.getElementById('nextVisitDate').value = qrNextVisit.replace(/\//g, '-');
+        calcVisit();
+      });
+    }
   }
 });
 
@@ -620,6 +667,11 @@ function renderSearchResults(patients) {
 // ============================================================
 // 患者詳細
 // ============================================================
+function openPatientFromVisit(patientId, patientName) {
+  // 往診ページから患者詳細を開く（戻るボタンで往診に戻れるよう履歴を維持）
+  openPatient(patientId);
+}
+
 async function openPatient(patientId) {
   showPage('patient');
   loading('patientContent');
@@ -809,6 +861,8 @@ function renderHistory(logs) {
 // ============================================================
 var hospitals = [];
 var hospitalsLoaded = false;
+var lastVisitResult = null; // 最後の往診計算結果（一括登録・PDF用）
+var visitBottleOverrides = {}; // {prescriptionId: 変更本数}
 
 async function loadHospitals() {
   if (hospitalsLoaded) return;
@@ -878,6 +932,10 @@ function renderVisitResults(result) {
     return;
   }
 
+  // 結果を保存（一括登録・PDF用）
+  lastVisitResult = result;
+  visitBottleOverrides = {};
+
   // 往診予定を自動保存
   api('addVisitPlan', null, { hospitalId: result.hospitalId, visitDate: result.visitDate, nextVisitDate: result.nextVisitDate }).catch(function(){});
 
@@ -886,7 +944,13 @@ function renderVisitResults(result) {
     + '往診日: <b>' + result.visitDate + '</b>　'
     + '次回: <b>' + result.nextVisitDate + '</b>　'
     + '目標日: <b>' + result.targetDate + '</b>（次回+7日）'
-    + '</div></div>';
+    + '</div>'
+    + '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'
+    + '<button class="btn btn-outline btn-sm" onclick="visitPrintPDF()" style="flex:1;min-width:120px">🖨 PDF印刷</button>'
+    + '<button class="btn btn-outline btn-sm" onclick="visitBulkEdit()" style="flex:1;min-width:120px">✏️ 本数変更</button>'
+    + '<button class="btn btn-success btn-sm" id="visitBulkRegisterBtn" onclick="visitBulkRegister()" style="flex:1;min-width:120px">📋 一括登録</button>'
+    + '</div>'
+    + '</div>';
 
   // 針の合計を患者ごとに集計
   var totalNeedlesByPatient = {};
@@ -943,9 +1007,10 @@ function renderVisitResults(result) {
         ? Math.ceil(m.requiredBottles * needlesPerBottle) : 0;
       if (isInjection) totalNeedles += needlesForThisMed;
 
-      // 表示用
-      var daysPerBottleStr  = daysPerBottle > 0 ? Math.round(daysPerBottle) + '日/本' : '-';
-      var dailyUseStr       = dailyUseUnits > 0 ? (Math.round(dailyUseUnits * 10) / 10) + '単位/日' : '-';
+      // 表示用（小数点を適切に表示）
+      var daysPerBottleStr = daysPerBottle > 0 ? (Math.round(daysPerBottle * 10) / 10) + '日/本' : '-';
+      var dailyUseStr      = dailyUseUnits > 0 ? (parseFloat(dailyUseUnits.toFixed(3)).toString()) + '単位/日' : '-';
+      var onceAmountStr    = onceAmount > 0 ? (parseFloat(onceAmount.toFixed(3)).toString()) + '単位/回' : '-';
 
       var needleInfo = '';
       if (isInjection && m.requiredBottles > 0 && needlesForThisMed > 0) {
@@ -954,18 +1019,19 @@ function renderVisitResults(result) {
           + '</div>';
       }
 
-      return '<div class="visit-med-row" style="flex-direction:column;align-items:stretch;gap:6px;padding:12px 14px">'
+      var pid = escapeJs(m.prescriptionId || '');
+      return '<div class="visit-med-row" data-prescriptionid="' + pid + '" style="flex-direction:column;align-items:stretch;gap:6px;padding:12px 14px">'
         + '<div style="display:flex;align-items:center;gap:8px">'
         + '<div class="visit-med-name">'
         + '<div style="font-weight:700">' + m.medicineName + (isInjection ? ' <span style="font-size:10px;background:#e3f2fd;color:#1a6fbf;padding:1px 5px;border-radius:4px">注射</span>' : '') + '</div>'
         + '<div style="font-size:11px;color:#9aa5b4">'
-        + freq + ' / <b style="color:#555">' + dailyUseStr + '</b> / <b style="color:#555">' + daysPerBottleStr + '</b>'
-        + ' / 在庫: ' + parseFloat(m.currentStock).toFixed(1) + '単位'
+        + freq + ' / <b style="color:#555">' + onceAmountStr + '</b> / <b style="color:#555">' + dailyUseStr + '</b> / <b style="color:#555">' + daysPerBottleStr + '</b>'
+        + ' / 在庫: ' + parseFloat(m.currentStock).toFixed(3).replace(/\.?0+$/, '') + '単位'
         + ' / 1本' + m.capacity + '単位'
         + (m.expireDays < 999 ? ' / 開封後' + m.expireDays + '日' : '')
         + '</div>'
         + '</div>'
-        + '<div class="visit-bottles">' + m.requiredBottles + '<span>本</span></div>'
+        + '<div class="visit-bottles" id="bottles-' + pid + '">' + m.requiredBottles + '<span>本</span></div>'
         + '</div>'
         + '<div style="background:#f5f7fa;border-radius:6px;padding:6px 10px;font-size:12px;display:flex;gap:12px;flex-wrap:wrap">'
         + '<div>📦 現在の在庫: ' + currentDepStr + 'まで</div>'
@@ -988,7 +1054,10 @@ function renderVisitResults(result) {
       : '';
 
     html += '<div class="visit-patient-block">'
-      + '<div class="visit-patient-name">' + pt.patientName + '</div>'
+      + '<div class="visit-patient-name" onclick="openPatientFromVisit(\'' + escapeJs(pt.patientId) + '\',\'' + escapeJs(pt.patientName) + '\')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">'
+      + '<span>' + pt.patientName + '</span>'
+      + '<span style="font-size:12px;opacity:0.7">詳細 ›</span>'
+      + '</div>'
       + meds
       + needleSummary
       + '</div>';
@@ -996,6 +1065,170 @@ function renderVisitResults(result) {
 
   el.innerHTML = html;
   toast('✓ 計算完了・往診予定を保存しました');
+}
+
+// ============================================================
+// 本数変更モーダル
+// ============================================================
+function visitBulkEdit() {
+  if (!lastVisitResult) return;
+  var rows = [];
+  lastVisitResult.patients.forEach(function(pt) {
+    (pt.prescriptions || []).forEach(function(m) {
+      var pid = m.prescriptionId || '';
+      var cur = visitBottleOverrides[pid] !== undefined ? visitBottleOverrides[pid] : m.requiredBottles;
+      rows.push({ pid: pid, name: pt.patientName, med: m.medicineName, bottles: cur });
+    });
+  });
+  var html = '<div style="font-size:13px;color:#9aa5b4;margin-bottom:8px">本数を変更する場合に入力してください</div>';
+  rows.forEach(function(r) {
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #e8ecf0">'
+      + '<div style="flex:1;font-size:13px"><b>' + escapeHtml(r.name) + '</b>　' + escapeHtml(r.med) + '</div>'
+      + '<input type="number" min="0" step="1" value="' + r.bottles + '" data-pid="' + escapeHtml(r.pid) + '" '
+      + 'style="width:64px;text-align:center;padding:6px 4px" onchange="visitBottleOverrides[this.dataset.pid]=parseInt(this.value)||0">'
+      + '<span style="font-size:13px">本</span>'
+      + '</div>';
+  });
+  document.getElementById('visitEditBody').innerHTML = html;
+  openModal('visitEditModal');
+}
+
+function applyVisitBottleEdits() {
+  // 変更した本数を画面に反映
+  Object.keys(visitBottleOverrides).forEach(function(pid) {
+    var el = document.getElementById('bottles-' + pid);
+    if (el) {
+      var n = visitBottleOverrides[pid];
+      el.innerHTML = n + '<span>本</span>' + (n > 0 ? ' <span style="font-size:10px;color:#e65100">✎変更</span>' : '');
+    }
+  });
+  closeModal('visitEditModal');
+  toast('✓ 本数を変更しました');
+}
+
+// ============================================================
+// 一括登録（処方受取ログ）
+// ============================================================
+async function visitBulkRegister() {
+  if (!lastVisitResult) return;
+  var btn = document.getElementById('visitBulkRegisterBtn');
+  btn.disabled = true; btn.textContent = '登録中...';
+
+  var tasks = [];
+  var visitDate = lastVisitResult.visitDate;
+  lastVisitResult.patients.forEach(function(pt) {
+    (pt.prescriptions || []).forEach(function(m) {
+      var pid = m.prescriptionId || '';
+      var bottles = visitBottleOverrides[pid] !== undefined ? visitBottleOverrides[pid] : m.requiredBottles;
+      if (bottles > 0) {
+        tasks.push({ prescriptionId: pid, bottles: bottles, date: visitDate });
+      }
+    });
+  });
+
+  if (!tasks.length) {
+    toast('登録対象がありません（必要本数0の薬品のみ）');
+    btn.disabled = false; btn.textContent = '📋 一括登録';
+    return;
+  }
+
+  try {
+    var results = await Promise.allSettled(tasks.map(function(t) {
+      return api('addLog', null, {
+        prescriptionId: t.prescriptionId,
+        action: '処方受取',
+        date: t.date,
+        bottles: t.bottles,
+        memo: '往診一括登録'
+      });
+    }));
+    var ok = results.filter(function(r) { return r.status === 'fulfilled'; }).length;
+    var ng = results.length - ok;
+    toast('✓ ' + ok + '件登録完了' + (ng > 0 ? '　失敗: ' + ng + '件' : ''));
+  } catch(e) {
+    toast('エラー: ' + e.message);
+  }
+  btn.disabled = false; btn.textContent = '📋 一括登録';
+}
+
+// ============================================================
+// PDF印刷
+// ============================================================
+function visitPrintPDF() {
+  if (!lastVisitResult) return;
+  var r = lastVisitResult;
+  var appUrl = location.href.split('?')[0];
+  var qrParam = '?hospital=' + encodeURIComponent(r.hospitalId)
+    + '&visitDate=' + encodeURIComponent(r.visitDate)
+    + '&nextVisitDate=' + encodeURIComponent(r.nextVisitDate);
+  var qrUrl = appUrl + qrParam;
+  var qrApiUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=' + encodeURIComponent(qrUrl);
+
+  var hospName = '';
+  hospitals.forEach(function(h) { if (h.hospitalId === r.hospitalId) hospName = h.hospitalName + '（' + h.facilityName + '）'; });
+
+  var rows = '';
+  r.patients.forEach(function(pt) {
+    (pt.prescriptions || []).forEach(function(m) {
+      var pid = m.prescriptionId || '';
+      var bottles = visitBottleOverrides[pid] !== undefined ? visitBottleOverrides[pid] : m.requiredBottles;
+      if (bottles === 0 && m.requiredBottles === 0) return; // 0本は省略
+      var isInjection = (m.medicineType === '注射' || m.medicineType === '注射薬');
+      var freq = m.frequency || '';
+      var onceAmount = parseFloat(m.dailyAmount) || 0;
+      var intervalDays = 1; var timesPerDay = 1;
+      if      (freq === '毎日')  { intervalDays = 1;   timesPerDay = 1; }
+      else if (freq === '週2回') { intervalDays = 3.5; timesPerDay = 2/7; }
+      else if (freq === '週1回') { intervalDays = 7;   timesPerDay = 1/7; }
+      else if (freq === '月1回') { intervalDays = 30;  timesPerDay = 1/30; }
+      var daysPerBottle = (onceAmount > 0) ? (m.capacity / onceAmount * intervalDays) : 0;
+      var needles = 0;
+      if (isInjection && daysPerBottle > 0 && bottles > 0) {
+        needles = Math.ceil(daysPerBottle * timesPerDay * bottles);
+      }
+      var needleStr = (isInjection && needles > 0) ? ' / 針' + needles + '本' : '';
+      var changed = visitBottleOverrides[pid] !== undefined && visitBottleOverrides[pid] !== m.requiredBottles;
+      rows += '<tr>'
+        + '<td style="padding:4px 8px;border:1px solid #ccc">' + escapeHtml(pt.patientName) + '</td>'
+        + '<td style="padding:4px 8px;border:1px solid #ccc">' + escapeHtml(m.medicineName) + '</td>'
+        + '<td style="padding:4px 8px;border:1px solid #ccc;text-align:center">' + freq + '</td>'
+        + '<td style="padding:4px 8px;border:1px solid #ccc;text-align:center;font-weight:700;color:' + (changed ? '#e65100' : '#000') + '">'
+        + bottles + '本' + (changed ? '✎' : '') + needleStr + '</td>'
+        + '<td style="padding:4px 8px;border:1px solid #ccc">' + (m.currentDepletionDate || '-') + ' → ' + (m.depletionDateAfter || '-') + '</td>'
+        + '</tr>';
+    });
+  });
+
+  var win = window.open('', '_blank');
+  win.document.write('<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">'
+    + '<title>往診処方一覧 ' + r.visitDate + '</title>'
+    + '<style>'
+    + 'body{font-family:"Hiragino Sans","Yu Gothic UI",sans-serif;font-size:11pt;margin:12mm;}'
+    + 'h2{font-size:14pt;margin:0 0 4px}h3{font-size:11pt;margin:0 0 8px;color:#555}'
+    + 'table{width:100%;border-collapse:collapse;font-size:10pt}'
+    + 'th{background:#1a6fbf;color:#fff;padding:5px 8px;border:1px solid #1a6fbf;font-size:10pt}'
+    + 'tr:nth-child(even){background:#f5f7fa}'
+    + '.info{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}'
+    + '.qr img{display:block}'
+    + '@media print{body{margin:8mm}button{display:none}}'
+    + '</style></head><body>'
+    + '<div class="info">'
+    + '<div>'
+    + '<h2>往診処方一覧</h2>'
+    + '<h3>' + escapeHtml(hospName) + '</h3>'
+    + '<div style="font-size:10pt">往診日: <b>' + r.visitDate + '</b>　次回: <b>' + r.nextVisitDate + '</b>　目標日: <b>' + r.targetDate + '</b></div>'
+    + '</div>'
+    + '<div class="qr"><img src="' + qrApiUrl + '" width="100" height="100" alt="QR"><div style="font-size:8pt;text-align:center;color:#555">アプリで開く</div></div>'
+    + '</div>'
+    + '<table><thead><tr>'
+    + '<th>患者名</th><th>薬品名</th><th>頻度</th><th>必要本数</th><th>枯渇日（前→後）</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table>'
+    + '<div style="margin-top:10px;font-size:9pt;color:#888">印刷日時: ' + new Date().toLocaleString('ja-JP') + '　✎=本数変更あり</div>'
+    + '<div style="margin-top:12px;text-align:center">'
+    + '<button onclick="window.print()" style="padding:10px 30px;font-size:13pt;background:#1a6fbf;color:#fff;border:none;border-radius:6px;cursor:pointer">🖨 印刷する</button>'
+    + '</div>'
+    + '</body></html>');
+  win.document.close();
 }
 
 async function loadVisitPlans() {
@@ -1019,12 +1252,97 @@ function renderVisitPlans(plans) {
   var hospMap = {};
   hospitals.forEach(function(h) { hospMap[h.hospitalId] = h.hospitalName + '（' + h.facilityName + '）'; });
   el.innerHTML = plans.map(function(p) {
-    return '<div class="card" style="margin-top:8px">'
-      + '<div style="font-weight:700;margin-bottom:4px">' + (hospMap[p.hospitalId] || p.hospitalId) + '</div>'
-      + '<div style="font-size:13px">往診日: <b>' + p.visitDate + '</b></div>'
-      + '<div style="font-size:13px">次回予定: <b>' + p.nextVisitDate + '</b></div>'
+    var hospLabel = escapeHtml(hospMap[p.hospitalId] || p.hospitalId);
+    var vd = escapeJs(p.visitDate); var nd = escapeJs(p.nextVisitDate); var hid = escapeJs(p.hospitalId);
+    return '<div class="card" style="margin-top:8px;cursor:pointer;transition:transform .1s" '
+      + 'onclick="openVisitPlanDetail(\'' + hid + '\',\'' + vd + '\',\'' + nd + '\')" '
+      + 'ontouchstart="this.style.transform=\'scale(.98)\'" ontouchend="this.style.transform=\'\'">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center">'
+      + '<div style="font-weight:700">' + hospLabel + '</div>'
+      + '<span style="font-size:12px;opacity:0.6">詳細 ›</span>'
+      + '</div>'
+      + '<div style="font-size:13px;margin-top:4px">往診日: <b>' + escapeHtml(p.visitDate) + '</b></div>'
+      + '<div style="font-size:13px">次回予定: <b>' + escapeHtml(p.nextVisitDate) + '</b></div>'
       + '</div>';
   }).join('');
+}
+
+async function openVisitPlanDetail(hospitalId, visitDate, nextVisitDate) {
+  // モーダルを開いてローディング表示
+  document.getElementById('visitPlanDetailTitle').textContent = visitDate + ' 往診';
+  document.getElementById('visitPlanDetailBody').innerHTML = '<div class="loading"><div class="spinner"></div>計算中...</div>';
+  openModal('visitPlanDetailModal');
+  try {
+    var result = await api('calcVisitPrescription', null, {
+      hospitalId: hospitalId,
+      visitDate: visitDate.replace(/-/g,'/'),
+      nextVisitDate: nextVisitDate.replace(/-/g,'/')
+    });
+    renderVisitPlanDetailResult(result);
+  } catch(e) {
+    document.getElementById('visitPlanDetailBody').innerHTML = '<div style="color:red;padding:12px">エラー: ' + e.message + '</div>';
+  }
+}
+
+function renderVisitPlanDetailResult(result) {
+  var el = document.getElementById('visitPlanDetailBody');
+  if (!result.patients || !result.patients.length) {
+    el.innerHTML = '<div class="empty-state">対象患者が見つかりません</div>';
+    return;
+  }
+  var html = '<div style="background:#e3f2fd;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:13px;color:#1a6fbf">'
+    + '往診日: <b>' + result.visitDate + '</b>　次回: <b>' + result.nextVisitDate + '</b>　目標日: <b>' + result.targetDate + '</b>（次回+7日）'
+    + '</div>';
+
+  result.patients.forEach(function(pt) {
+    // 針の合計
+    var totalNeedles = 0;
+    var drugsHtml = '';
+    (pt.drugs || []).forEach(function(m) {
+      var isInjection = (m.medicineType === '注射' || m.medicineType === '注射薬');
+      var bottles = m.requiredBottles || 0;
+      var sufficient = m.sufficient;
+      var statusColor = sufficient ? '#2e7d32' : '#c62828';
+      var statusLabel = sufficient ? '在庫十分' : '要処方';
+      var daysPerBottle = (m.bottleSize && m.dailyUseUnits > 0) ? m.bottleSize / m.dailyUseUnits : 0;
+      var daysPerBottleStr = daysPerBottle > 0 ? (Math.round(daysPerBottle * 10) / 10) + '日/本' : '-';
+      var dailyUseStr = m.dailyUseUnits > 0 ? (parseFloat(m.dailyUseUnits.toFixed(3)).toString()) + '単位/日' : '-';
+      var onceAmountStr = m.onceAmount > 0 ? (parseFloat(m.onceAmount.toFixed(3)).toString()) + '単位/回' : '-';
+      var needleStr = '';
+      if (isInjection && m.timesPerDay > 0 && daysPerBottle > 0) {
+        var needlesPerBottle = Math.ceil(daysPerBottle) * m.timesPerDay;
+        var totalN = needlesPerBottle * bottles;
+        var packs = Math.ceil(totalN / 14);
+        totalNeedles += totalN;
+        needleStr = '<div style="font-size:12px;color:#1a6fbf;margin-top:2px">針: ' + totalN + '本（' + packs + 'パック）</div>';
+      }
+      drugsHtml += '<div style="background:#f5f7fa;border-radius:8px;padding:8px 10px;margin-bottom:6px">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center">'
+        + '<span style="font-weight:700;font-size:14px">' + escapeHtml(m.medicineName) + '</span>'
+        + '<span style="font-size:12px;color:' + statusColor + ';font-weight:700">' + (bottles > 0 ? bottles + '本' : '不要') + '　' + statusLabel + '</span>'
+        + '</div>'
+        + '<div style="font-size:12px;color:#9aa5b4;margin-top:2px">'
+        + '1回: ' + onceAmountStr + '　1日: ' + dailyUseStr + '　' + daysPerBottleStr
+        + '</div>'
+        + (m.currentDepletionDate ? '<div style="font-size:12px;color:#9aa5b4">現在枯渇: ' + m.currentDepletionDate + '　→　処方後: ' + (m.postDepletionDate||'-') + '</div>' : '')
+        + needleStr
+        + '</div>';
+    });
+    var needleTotalStr = totalNeedles > 0
+      ? '<div style="font-size:13px;color:#1a6fbf;margin-top:4px">針合計: <b>' + totalNeedles + '本</b>（<b>' + Math.ceil(totalNeedles/14) + 'パック</b>）</div>'
+      : '';
+    html += '<div style="background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:10px;overflow:hidden">'
+      + '<div style="background:#1a6fbf;color:#fff;padding:10px 14px;cursor:pointer" onclick="closeModal(\'visitPlanDetailModal\');openPatient(\'' + escapeJs(pt.patientId) + '\')">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center">'
+      + '<span style="font-weight:700">' + escapeHtml(pt.patientName) + '</span>'
+      + '<span style="font-size:12px;opacity:0.8">詳細 ›</span>'
+      + '</div>'
+      + needleTotalStr
+      + '</div>'
+      + '<div style="padding:10px 12px">' + drugsHtml + '</div>'
+      + '</div>';
+  });
+  el.innerHTML = html;
 }
 
 // ============================================================
@@ -1038,7 +1356,7 @@ var MASTER_DEF = {
   patient: {
     label: '患者',
     fields: [
-      { key: '患者ID',                         label: '患者ID',         type: 'text',   required: true,  readonly: 'edit' },
+      { key: '患者ID',                         label: '患者ID（自動発行）', type: 'text',   required: false, readonly: 'always' },
       { key: '氏名',                            label: '氏名',           type: 'text',   required: true  },
       { key: '検索用ID（6桁、和暦生年月日）',  label: '生年月日コード', type: 'text',   required: false },
       { key: '病院ID',                          label: '病院',           type: 'select', required: true,  optionSource: 'hospital' },
@@ -1048,7 +1366,7 @@ var MASTER_DEF = {
   facility: {
     label: '施設',
     fields: [
-      { key: '施設ID',   label: '施設ID', type: 'text', required: true, readonly: 'edit' },
+      { key: '施設ID',   label: '施設ID（自動発行）', type: 'text', required: false, readonly: 'always' },
       { key: '施設名',   label: '施設名', type: 'text', required: true },
     ],
     rowLabel: function(r) { return r['施設名']; },
@@ -1056,7 +1374,7 @@ var MASTER_DEF = {
   hospital: {
     label: '病院・クリニック',
     fields: [
-      { key: '病院ID', label: '病院ID', type: 'text',   required: true,  readonly: 'edit' },
+      { key: '病院ID', label: '病院ID（自動発行）', type: 'text', required: false, readonly: 'always' },
       { key: '病院名', label: '病院名', type: 'text',   required: true  },
       { key: '施設ID', label: '施設',   type: 'select', required: true,  optionSource: 'facility' },
     ],
@@ -1065,18 +1383,19 @@ var MASTER_DEF = {
   medicine: {
     label: '薬品',
     fields: [
-      { key: '薬品ID',         label: '薬品ID',       type: 'text',   required: true,  readonly: 'edit' },
+      { key: '薬品ID',         label: '薬品ID（自動発行）', type: 'text',   required: false, readonly: 'always' },
       { key: '薬品名',         label: '薬品名',       type: 'text',   required: true  },
       { key: '種類',           label: '種類',         type: 'select', required: false, options: ['注射', '吸入薬', '経口薬', 'その他'] },
       { key: '1本容量',        label: '1本容量（単位）', type: 'number', required: false },
       { key: '開封後有効日数', label: '開封後有効日数（期限なしは999）', type: 'number', required: false },
+      { key: '使用頻度',       label: '使用頻度（固定の場合）', type: 'select', required: false, options: ['', '毎日', '週2回', '週1回', '月1回'] },
     ],
     rowLabel: function(r) { return r['薬品名'] + '　' + (r['種類'] || '') + '  1本' + (r['1本容量'] || '-') + '単位 / 開封後' + (r['開封後有効日数'] >= 999 ? '期限なし' : (r['開封後有効日数'] || '-') + '日'); },
   },
   prescription: {
     label: '処方',
     fields: [
-      { key: '処方ID',      label: '処方ID',       type: 'text',   required: true,  readonly: 'edit' },
+      { key: '処方ID',      label: '処方ID（自動発行）', type: 'text',   required: false, readonly: 'always' },
       { key: '患者ID',      label: '患者',         type: 'select', required: true,  optionSource: 'patient' },
       { key: '薬品ID',      label: '薬品',         type: 'select', required: true,  optionSource: 'medicine' },
       { key: '病院ID',      label: '病院',         type: 'select', required: true,  optionSource: 'hospital' },
@@ -1220,11 +1539,12 @@ async function renderMasterFields(type, record) {
   for (var i = 0; i < def.fields.length; i++) {
     var f = def.fields[i];
     var val = record ? (record[f.key] !== undefined ? record[f.key] : '') : '';
-    var isReadonly = f.readonly === 'edit' && record;
+    var isReadonly = f.readonly === 'always' || (f.readonly === 'edit' && record);
     html += '<div class="form-group"><label>' + f.label + (f.required ? ' *' : '') + '</label>';
 
     if (isReadonly) {
-      html += '<input type="text" value="' + escapeHtml(String(val)) + '" readonly style="background:#f5f7fa;color:#9aa5b4">';
+      var displayVal = f.readonly === 'always' && !record ? '（保存時に自動発行）' : escapeHtml(String(val));
+      html += '<input type="text" value="' + displayVal + '" readonly style="background:#f5f7fa;color:#9aa5b4">';
     } else if (f.type === 'select') {
       html += '<select id="mf_' + f.key + '">';
       html += '<option value="">選択してください</option>';
@@ -1267,14 +1587,20 @@ async function saveMaster() {
   var valid  = true;
 
   def.fields.forEach(function(f) {
+    // 常にreadonly（自動発行ID等）→ 既存レコードの値をそのまま使用、新規は空でGASが自動発行
+    if (f.readonly === 'always') {
+      if (currentMasterRecord) record[f.key] = currentMasterRecord[f.key] || '';
+      // 新規の場合はrecordに含めない（GAS側で自動生成）
+      return;
+    }
     var el = document.getElementById('mf_' + f.key);
     if (!el) {
-      // readonlyフィールド → 既存レコードの値をそのまま使用
+      // edit時readonlyフィールド → 既存レコードの値をそのまま使用
       if (currentMasterRecord) record[f.key] = currentMasterRecord[f.key] || '';
       return;
     }
     var val = el.value.trim();
-    if (f.required && !val) { toast(f.label + ' は必須です'); valid = false; }
+    if (f.required && !val) { toast(f.label + ' は必須です'); valid = false; return; }
     if (f.type === 'number' && val) val = parseFloat(val);
     record[f.key] = val;
   });
