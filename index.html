@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>注射薬在庫管理</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --primary:   #1a6fbf;
+  --primary-d: #155299;
+  --success:   #2e7d32;
+  --warning:   #e65100;
+  --danger:    #c62828;
+  --gray-100:  #f5f7fa;
+  --gray-200:  #e8ecf0;
+  --gray-400:  #9aa5b4;
+  --gray-700:  #3d4d5c;
+  --white:     #ffffff;
+  --radius:    10px;
+  --shadow:    0 2px 8px rgba(0,0,0,.12);
+}
+html, body { height: 100%; background: var(--gray-100); font-family: 'Hiragino Sans', 'Yu Gothic UI', sans-serif; font-size: 15px; color: var(--gray-700); }
+#nav {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+  display: flex; background: var(--white);
+  box-shadow: 0 -2px 10px rgba(0,0,0,.1);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.nav-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 8px 4px; border: none; background: transparent;
+  font-size: 11px; color: var(--gray-400); cursor: pointer; gap: 3px; transition: color .2s;
+}
+.nav-btn svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+.nav-btn.active { color: var(--primary); }
+#app { padding: 0 0 68px 0; min-height: 100vh; }
+.page { display: none; }
+.page.active { display: block; }
+.page-header {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--primary); color: var(--white);
+  padding: 14px 16px 12px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.15);
+}
+.page-header h1 { font-size: 18px; font-weight: 700; }
+.page-header p  { font-size: 13px; opacity: .85; margin-top: 2px; }
+.card {
+  background: var(--white); border-radius: var(--radius);
+  box-shadow: var(--shadow); margin: 12px 12px 0; padding: 14px 16px;
+}
+.card:last-child { margin-bottom: 12px; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 18px; border-radius: 8px; border: none; font-size: 15px;
+  font-weight: 600; cursor: pointer; transition: opacity .15s;
+}
+.btn:active { opacity: .75; }
+.btn-primary { background: var(--primary); color: var(--white); }
+.btn-success { background: var(--success); color: var(--white); }
+.btn-outline  { background: transparent; color: var(--primary); border: 2px solid var(--primary); }
+.btn-danger   { background: var(--danger); color: var(--white); }
+.btn-full { width: 100%; }
+.btn-sm { padding: 7px 12px; font-size: 13px; }
+input, select, textarea {
+  width: 100%; padding: 10px 12px; border: 1.5px solid var(--gray-200);
+  border-radius: 8px; font-size: 15px; color: var(--gray-700);
+  background: var(--white); outline: none; transition: border-color .2s;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--primary); }
+label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400); margin-bottom: 4px; }
+.form-group { margin-bottom: 14px; }
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 20px;
+  font-size: 12px; font-weight: 700;
+}
+.badge-ok      { background: #e8f5e9; color: var(--success); }
+.badge-warn    { background: #fff3e0; color: var(--warning); }
+.badge-danger  { background: #ffebee; color: var(--danger); }
+.badge-gray    { background: var(--gray-200); color: var(--gray-400); }
+.badge-blue    { background: #e3f2fd; color: var(--primary); }
+.patient-card {
+  background: var(--white); border-radius: var(--radius); box-shadow: var(--shadow);
+  margin: 8px 12px 0; padding: 14px 16px; cursor: pointer;
+  display: flex; align-items: center; gap: 12px; transition: transform .1s;
+}
+.patient-card:active { transform: scale(.98); }
+.patient-avatar {
+  width: 42px; height: 42px; border-radius: 50%; background: var(--primary);
+  color: var(--white); display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 700; flex-shrink: 0;
+}
+.patient-info { flex: 1; min-width: 0; }
+.patient-name { font-size: 16px; font-weight: 700; }
+.patient-sub  { font-size: 12px; color: var(--gray-400); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rx-card {
+  background: var(--white); border-radius: var(--radius); box-shadow: var(--shadow);
+  margin: 8px 12px 0; overflow: hidden;
+}
+.rx-header {
+  padding: 12px 14px; display: flex; align-items: flex-start; gap: 10px;
+  border-bottom: 1px solid var(--gray-200);
+}
+.rx-name  { font-size: 15px; font-weight: 700; flex: 1; }
+.rx-body  { padding: 10px 14px; }
+.rx-row   { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 14px; }
+.rx-label { color: var(--gray-400); font-size: 13px; }
+.rx-actions { padding: 10px 14px; display: flex; gap: 8px; border-top: 1px solid var(--gray-200); flex-wrap: wrap; }
+.rx-actions .btn { flex: 1; font-size: 13px; padding: 8px 6px; min-width: 60px; }
+.stock-bar-wrap { margin: 6px 0; }
+.stock-bar-bg { background: var(--gray-200); border-radius: 4px; height: 6px; overflow: hidden; }
+.stock-bar-fill { height: 100%; border-radius: 4px; transition: width .3s; }
+.modal-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200;
+  align-items: flex-end; justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--white); width: 100%; max-width: 600px;
+  border-radius: 18px 18px 0 0; padding: 20px 18px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  max-height: 90vh; overflow-y: auto;
+}
+.modal-title { font-size: 17px; font-weight: 700; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+.modal-title button { background: none; border: none; font-size: 26px; cursor: pointer; color: var(--gray-400); line-height: 1; }
+.loading { text-align: center; padding: 40px; color: var(--gray-400); }
+.spinner {
+  width: 32px; height: 32px; border: 3px solid var(--gray-200);
+  border-top-color: var(--primary); border-radius: 50%; animation: spin .7s linear infinite;
+  margin: 0 auto 12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.search-wrap { padding: 12px 12px 0; position: relative; }
+.search-wrap input { padding-left: 40px; }
+.search-icon {
+  position: absolute; left: 22px; top: 50%; transform: translateY(-50%);
+  width: 20px; height: 20px; stroke: var(--gray-400); fill: none; pointer-events: none;
+}
+.visit-patient-block { margin: 10px 12px 0; }
+.visit-patient-name {
+  background: var(--primary); color: var(--white); padding: 8px 14px;
+  border-radius: var(--radius) var(--radius) 0 0; font-weight: 700; font-size: 15px;
+}
+.visit-med-row {
+  background: var(--white); padding: 10px 14px;
+  border-left: 1px solid var(--gray-200); border-right: 1px solid var(--gray-200);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.visit-med-row:last-child { border-bottom: 1px solid var(--gray-200); border-radius: 0 0 var(--radius) var(--radius); }
+.visit-med-name { font-size: 14px; flex: 1; }
+.visit-bottles  { font-size: 26px; font-weight: 800; color: var(--primary); min-width: 50px; text-align: right; }
+.visit-bottles span { font-size: 13px; font-weight: 500; color: var(--gray-400); }
+#toast {
+  position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+  background: var(--gray-700); color: var(--white); padding: 10px 20px;
+  border-radius: 24px; font-size: 14px; z-index: 999; opacity: 0;
+  transition: opacity .3s; pointer-events: none; white-space: nowrap;
+}
+#toast.show { opacity: 1; }
+.tabs { display: flex; margin: 12px 12px 0; gap: 8px; }
+.tab-btn {
+  flex: 1; padding: 8px; border-radius: 8px; border: 2px solid var(--gray-200);
+  background: var(--white); font-size: 13px; font-weight: 600; cursor: pointer;
+  color: var(--gray-400); transition: all .2s;
+}
+.tab-btn.active { border-color: var(--primary); color: var(--primary); background: #e3f2fd; }
+.section-label {
+  padding: 16px 16px 6px; font-size: 12px; font-weight: 700;
+  color: var(--gray-400); text-transform: uppercase; letter-spacing: .06em;
+}
+.depletion-soon { color: var(--danger); font-weight: 700; }
+.depletion-warn { color: var(--warning); font-weight: 700; }
+.back-btn {
+  background: none; border: none; color: var(--white); font-size: 14px;
+  cursor: pointer; display: flex; align-items: center; gap: 4px; margin-bottom: 4px; opacity: .9;
+}
+.empty-state { text-align: center; color: var(--gray-400); padding: 40px 20px; }
+.settings-icon { width: 56px; height: 56px; border-radius: 50%; background: var(--primary); display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
+.settings-icon svg { width: 28px; height: 28px; stroke: white; fill: none; stroke-width: 1.8; }
+.url-display { background: var(--gray-100); border-radius: 8px; padding: 10px 12px; font-size: 12px; word-break: break-all; color: var(--gray-700); margin-top: 8px; min-height: 40px; }
+.setup-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 300;
+  align-items: center; justify-content: center; padding: 20px;
+}
+.setup-overlay.open { display: flex; }
+.setup-box {
+  background: var(--white); width: 100%; max-width: 480px; border-radius: 18px;
+  padding: 28px 22px; max-height: 90vh; overflow-y: auto;
+}
+.setup-box h2 { font-size: 20px; font-weight: 800; margin-bottom: 6px; }
+.setup-box p  { font-size: 13px; color: var(--gray-400); margin-bottom: 20px; line-height: 1.5; }
+.step-badge { display: inline-block; background: var(--primary); color: white; border-radius: 50%; width: 22px; height: 22px; font-size: 12px; font-weight: 700; text-align: center; line-height: 22px; margin-right: 6px; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- 検索ページ -->
+  <div id="page-search" class="page active">
+    <div class="page-header">
+      <h1>注射薬在庫管理</h1>
+      <p>患者名・生年月日コード・施設名で検索</p>
+    </div>
+    <div class="search-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="search" id="searchInput" placeholder="例：山田 / 240701 / ハーモニー" autocomplete="off">
+    </div>
+    <div id="searchResults"></div>
+  </div>
+
+  <!-- 患者詳細ページ -->
+  <div id="page-patient" class="page">
+    <div class="page-header">
+      <button class="back-btn" onclick="showPage('search')">&#8592; 戻る</button>
+      <h1 id="patientName">患者詳細</h1>
+      <p id="patientSub"></p>
+    </div>
+    <div id="patientContent"></div>
+  </div>
+
+  <!-- 設定ページ -->
+  <div id="page-settings" class="page">
+    <div class="page-header">
+      <h1>設定</h1>
+      <p>GAS Web App URLの設定</p>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="settings-icon">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+      </div>
+      <h3 style="text-align:center;margin-bottom:6px">GAS Web App URL</h3>
+      <p style="text-align:center;font-size:13px;color:var(--gray-400);margin-bottom:16px">Google Apps ScriptのデプロイURLを入力してください</p>
+      <div class="form-group">
+        <label>Web App URL</label>
+        <input type="url" id="settingsGasUrl" placeholder="https://script.google.com/macros/s/..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      </div>
+      <button class="btn btn-primary btn-full" onclick="saveGasUrl()">保存して接続する</button>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--gray-400)">現在のURL</div>
+      <div class="url-display" id="currentUrlDisplay">未設定</div>
+      <button class="btn btn-outline btn-full btn-sm" style="margin-top:10px" onclick="clearGasUrl()">URLをリセット</button>
+    </div>
+    <div class="card" style="margin-top:12px;background:#fff8e1">
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px">📋 URLの確認方法</div>
+      <div style="font-size:13px;line-height:1.7;color:var(--gray-700)">
+        <span class="step-badge">1</span>GASエディタ → 「デプロイ」→「デプロイを管理」<br>
+        <span class="step-badge">2</span>「ウェブアプリ」のURLをコピー<br>
+        <span class="step-badge">3</span>上の入力欄に貼り付けて保存
+      </div>
+    </div>
+  </div>
+
+  <!-- 往診ページ -->
+  <div id="page-visit" class="page">
+    <div class="page-header">
+      <h1>往診管理</h1>
+      <p>処方本数の計算と往診予定の管理</p>
+    </div>
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchVisitTab('calc')" id="tab-calc">処方本数計算</button>
+      <button class="tab-btn" onclick="switchVisitTab('plans')" id="tab-plans">往診予定一覧</button>
+    </div>
+    <div id="visitCalcSection">
+      <div class="card">
+        <div class="form-group">
+          <label>病院・クリニック</label>
+          <select id="visitHospital">
+            <option value="">選択してください</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>今回往診日</label>
+          <input type="date" id="visitDate">
+        </div>
+        <div class="form-group">
+          <label>次回往診予定日</label>
+          <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+            <button class="btn btn-outline btn-sm" onclick="setNextVisitDays(14)">14日後</button>
+            <button class="btn btn-outline btn-sm" onclick="setNextVisitDays(21)">21日後</button>
+            <button class="btn btn-outline btn-sm" onclick="setNextVisitDays(28)">28日後</button>
+            <button class="btn btn-outline btn-sm" onclick="setNextVisitDays(35)">35日後</button>
+          </div>
+          <input type="date" id="nextVisitDate">
+        </div>
+        <button class="btn btn-primary btn-full" onclick="calcVisit()">必要処方本数を計算</button>
+      </div>
+      <div id="visitResults"></div>
+    </div>
+    <div id="visitPlansSection" style="display:none">
+      <div class="card">
+        <div class="form-group">
+          <label>病院フィルター（任意）</label>
+          <select id="planFilterHospital"><option value="">すべて</option></select>
+        </div>
+        <button class="btn btn-outline btn-full" onclick="loadVisitPlans()">一覧を更新</button>
+      </div>
+      <div id="visitPlansList"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ボトムナビ -->
+<nav id="nav">
+  <button class="nav-btn active" onclick="showPage('search')" id="nav-search">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    患者検索
+  </button>
+  <button class="nav-btn" onclick="showPage('visit')" id="nav-visit">
+    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
+    往診
+  </button>
+  <button class="nav-btn" onclick="showPage('settings')" id="nav-settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    設定
+  </button>
+</nav>
+
+<!-- 初期セットアップオーバーレイ -->
+<div class="setup-overlay" id="setupOverlay">
+  <div class="setup-box">
+    <h2>🏥 初期設定</h2>
+    <p>使い始める前に、Google Apps ScriptのWeb App URLを設定してください。</p>
+    <div class="form-group">
+      <label>GAS Web App URL</label>
+      <input type="url" id="setupGasUrl" placeholder="https://script.google.com/macros/s/..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="font-size:14px">
+    </div>
+    <button class="btn btn-primary btn-full" onclick="saveGasUrlFromSetup()" style="margin-bottom:12px">保存して開始する</button>
+    <div style="background:#fff8e1;border-radius:8px;padding:12px;font-size:12px;line-height:1.7">
+      <b>URLの確認方法：</b><br>
+      GASエディタ →「デプロイ」→「デプロイを管理」→ ウェブアプリのURLをコピー
+    </div>
+  </div>
+</div>
+
+<!-- ログ入力モーダル -->
+<div class="modal-overlay" id="logModal">
+  <div class="modal">
+    <div class="modal-title">
+      <span id="logModalTitle">記録入力</span>
+      <button onclick="closeModal('logModal')">&#215;</button>
+    </div>
+    <input type="hidden" id="logPrescriptionId">
+    <div class="form-group">
+      <label>アクション</label>
+      <select id="logAction" onchange="onLogActionChange()">
+        <option value="処方受取">処方受取</option>
+        <option value="残数確認">残数確認</option>
+        <option value="用量変更">用量変更</option>
+        <option value="中止">中止</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>実施日</label>
+      <input type="date" id="logDate">
+    </div>
+    <div id="logSection-処方受取">
+      <div class="form-group">
+        <label>受取本数</label>
+        <input type="number" id="logBottles" min="0" step="1" placeholder="例：2">
+      </div>
+      <div class="form-group">
+        <label>次回処方予定日（任意）</label>
+        <input type="date" id="logNextVisit">
+      </div>
+    </div>
+    <div id="logSection-残数確認" style="display:none">
+      <div class="form-group">
+        <label>確認後の在庫（単位）</label>
+        <input type="number" id="logNewStock" min="0" step="0.1" placeholder="例：280">
+      </div>
+    </div>
+    <div id="logSection-用量変更" style="display:none">
+      <div class="form-group">
+        <label>新しい1日使用量（単位）</label>
+        <input type="number" id="logNewDailyAmount" min="0" step="0.1" placeholder="例：12">
+      </div>
+      <div class="form-group">
+        <label>使用頻度</label>
+        <select id="logNewFrequency">
+          <option value="毎日">毎日</option>
+          <option value="週2回">週2回</option>
+          <option value="週1回">週1回</option>
+          <option value="月1回">月1回</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>備考（任意）</label>
+      <textarea id="logMemo" rows="2" placeholder="メモ"></textarea>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="submitLog()">記録する</button>
+  </div>
+</div>
+
+<!-- 履歴モーダル -->
+<div class="modal-overlay" id="historyModal">
+  <div class="modal">
+    <div class="modal-title">
+      <span>管理記録履歴</span>
+      <button onclick="closeModal('historyModal')">&#215;</button>
+    </div>
+    <div id="historyContent"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ============================================================
+// GAS URL 管理（localStorage で永続化）
+// ============================================================
+var GAS_URL = localStorage.getItem('gasUrl') || '';
+
+function getGasUrl() {
+  return localStorage.getItem('gasUrl') || '';
+}
+
+function saveGasUrl() {
+  var val = document.getElementById('settingsGasUrl').value.trim();
+  if (!val || !val.startsWith('https://')) {
+    toast('正しいURLを入力してください（https://...）');
+    return;
+  }
+  localStorage.setItem('gasUrl', val);
+  GAS_URL = val;
+  updateUrlDisplay();
+  toast('URLを保存しました ✓', 2000);
+}
+
+function saveGasUrlFromSetup() {
+  var val = document.getElementById('setupGasUrl').value.trim();
+  if (!val || !val.startsWith('https://')) {
+    toast('正しいURLを入力してください（https://...）');
+    return;
+  }
+  localStorage.setItem('gasUrl', val);
+  GAS_URL = val;
+  document.getElementById('setupOverlay').classList.remove('open');
+  updateUrlDisplay();
+  toast('設定を保存しました ✓ アプリを使い始めましょう！', 3000);
+}
+
+function clearGasUrl() {
+  if (!confirm('URLをリセットしますか？')) return;
+  localStorage.removeItem('gasUrl');
+  GAS_URL = '';
+  document.getElementById('settingsGasUrl').value = '';
+  updateUrlDisplay();
+  toast('URLをリセットしました');
+}
+
+function updateUrlDisplay() {
+  var url = getGasUrl();
+  var el = document.getElementById('currentUrlDisplay');
+  if (el) el.textContent = url || '未設定';
+  var inp = document.getElementById('settingsGasUrl');
+  if (inp && url) inp.value = url;
+}
+
+// ============================================================
+// API呼び出し
+// ============================================================
+async function api(action, params, body) {
+  GAS_URL = getGasUrl();
+  if (!GAS_URL) {
+    document.getElementById('setupOverlay').classList.add('open');
+    throw new Error('GAS URLが設定されていません。設定画面でURLを入力してください。');
+  }
+  params = params || {};
+  const url = new URL(GAS_URL);
+  url.searchParams.set('action', action);
+  Object.keys(params).forEach(function(k) { url.searchParams.set(k, params[k]); });
+
+  // GASのCORS制約のため、POSTデータもGETパラメータとして送る
+  if (body) {
+    url.searchParams.set('payload', JSON.stringify(body));
+  }
+
+  const res = await fetch(url.toString(), { method: 'GET' });
+  const data = await res.json();
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+
+// ============================================================
+// ページ管理
+// ============================================================
+var currentPatient = null;
+
+function showPage(page) {
+  document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
+  document.querySelectorAll('.nav-btn').forEach(function(b) { b.classList.remove('active'); });
+  document.getElementById('page-' + page).classList.add('active');
+  var nb = document.getElementById('nav-' + page);
+  if (nb) nb.classList.add('active');
+  if (page === 'visit') { loadHospitals(); setDefaultDates(); }
+  if (page === 'settings') { updateUrlDisplay(); }
+}
+
+// 起動時: URLが未設定ならセットアップ画面を表示
+window.addEventListener('DOMContentLoaded', function() {
+  if (!getGasUrl()) {
+    document.getElementById('setupOverlay').classList.add('open');
+  } else {
+    updateUrlDisplay();
+  }
+});
+
+// ============================================================
+// ユーティリティ
+// ============================================================
+function toast(msg, duration) {
+  duration = duration || 2500;
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(function() { el.classList.remove('show'); }, duration);
+}
+
+function loading(id) {
+  document.getElementById(id).innerHTML = '<div class="loading"><div class="spinner"></div>読み込み中...</div>';
+}
+
+function todayStr() {
+  var d = new Date();
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+}
+
+function dateToStr(d) {
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+}
+
+function pad(n) { return String(n).padStart(2, '0'); }
+
+// ============================================================
+// 患者検索
+// ============================================================
+var searchTimer = null;
+document.getElementById('searchInput').addEventListener('input', function() {
+  clearTimeout(searchTimer);
+  var q = this.value.trim();
+  if (q.length < 1) { document.getElementById('searchResults').innerHTML = ''; return; }
+  searchTimer = setTimeout(function() { doSearch(q); }, 400);
+});
+
+async function doSearch(q) {
+  loading('searchResults');
+  try {
+    var results = await api('searchPatients', { q: q });
+    renderSearchResults(results);
+  } catch(e) {
+    document.getElementById('searchResults').innerHTML = '<div class="card" style="color:red">エラー: ' + e.message + '</div>';
+  }
+}
+
+function renderSearchResults(patients) {
+  var el = document.getElementById('searchResults');
+  if (!patients || !patients.length) {
+    el.innerHTML = '<div class="empty-state">該当する患者が見つかりません</div>';
+    return;
+  }
+  el.innerHTML = patients.map(function(p) {
+    return '<div class="patient-card" onclick="openPatient(\'' + p.patientId + '\')">'
+      + '<div class="patient-avatar">' + (p.name ? p.name.charAt(0) : '?') + '</div>'
+      + '<div class="patient-info">'
+      + '<div class="patient-name">' + p.name + '</div>'
+      + '<div class="patient-sub">' + (p.facilityName || p.hospitalName || '') + '　' + (p.searchId || '') + '</div>'
+      + '</div>'
+      + '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9aa5b4" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>'
+      + '</div>';
+  }).join('');
+}
+
+// ============================================================
+// 患者詳細
+// ============================================================
+async function openPatient(patientId) {
+  showPage('patient');
+  loading('patientContent');
+  try {
+    var results = await Promise.all([
+      api('getPatientDetail', { patientId: patientId }),
+      api('getPrescriptions', { patientId: patientId })
+    ]);
+    currentPatient = results[0];
+    renderPatientDetail(results[0], results[1]);
+  } catch(e) {
+    document.getElementById('patientContent').innerHTML = '<div class="card" style="color:red">エラー: ' + e.message + '</div>';
+  }
+}
+
+function renderPatientDetail(patient, prescriptions) {
+  document.getElementById('patientName').textContent = patient.name;
+  document.getElementById('patientSub').textContent = (patient.facilityName || patient.hospitalName || '') + '　ID: ' + (patient.searchId || '');
+
+  var active  = prescriptions.filter(function(p) { return p.status === '使用中'; });
+  var stopped = prescriptions.filter(function(p) { return p.status !== '使用中'; });
+
+  var html = '';
+  if (active.length) {
+    html += '<div class="section-label">使用中の薬品</div>';
+    html += active.map(function(p) { return renderRxCard(p, false); }).join('');
+  }
+  if (stopped.length) {
+    html += '<div class="section-label">中止済み</div>';
+    html += stopped.map(function(p) { return renderRxCard(p, true); }).join('');
+  }
+  if (!prescriptions.length) {
+    html = '<div class="empty-state">処方情報がありません</div>';
+  }
+  document.getElementById('patientContent').innerHTML = html;
+}
+
+function renderRxCard(p, stopped) {
+  var days = p.daysUntilDepletion;
+  var depClass, depLabel;
+  if (days === null || days === undefined) {
+    depLabel = '計算不可'; depClass = 'badge-gray';
+  } else if (days <= 7) {
+    depLabel = '残' + days + '日'; depClass = 'badge-danger';
+  } else if (days <= 14) {
+    depLabel = '残' + days + '日'; depClass = 'badge-warn';
+  } else {
+    depLabel = '残' + days + '日'; depClass = 'badge-ok';
+  }
+
+  var pct = days !== null && days !== undefined ? Math.min(100, Math.max(0, (days / 90) * 100)) : 0;
+  var barColor = days <= 7 ? '#c62828' : days <= 14 ? '#e65100' : '#2e7d32';
+  var stockUnit = (p.stock !== null && p.stock !== undefined) ? parseFloat(p.stock).toFixed(1) : '-';
+
+  var expireWarn = '';
+  if (p.openExpireDate && p.openExpireDate !== p.depletionDate && p.openExpireDate !== p.effectiveDepletionDate) {
+    expireWarn = '<div class="rx-row"><span class="rx-label">開封期限</span><span class="depletion-warn">' + p.openExpireDate + '</span></div>';
+  }
+
+  var depClass2 = days <= 7 ? 'depletion-soon' : days <= 14 ? 'depletion-warn' : '';
+
+  var actions = stopped ? '' :
+    '<div class="rx-actions">'
+    + '<button class="btn btn-primary btn-sm" onclick="openLogModal(\'' + p.prescriptionId + '\',\'処方受取\',\'' + p.medicineName.replace(/'/g,"") + '\')">受取</button>'
+    + '<button class="btn btn-outline btn-sm" onclick="openLogModal(\'' + p.prescriptionId + '\',\'残数確認\',\'' + p.medicineName.replace(/'/g,"") + '\')">残数</button>'
+    + '<button class="btn btn-outline btn-sm" onclick="openLogModal(\'' + p.prescriptionId + '\',\'用量変更\',\'' + p.medicineName.replace(/'/g,"") + '\')">変更</button>'
+    + '<button class="btn btn-outline btn-sm" onclick="showHistory(\'' + p.prescriptionId + '\')">履歴</button>'
+    + '</div>';
+
+  return '<div class="rx-card" style="' + (stopped ? 'opacity:.6' : '') + '">'
+    + '<div class="rx-header">'
+    + '<div class="rx-name">' + p.medicineName + '</div>'
+    + '<span class="badge ' + depClass + '">' + depLabel + '</span>'
+    + '</div>'
+    + '<div class="rx-body">'
+    + '<div class="stock-bar-wrap"><div class="stock-bar-bg"><div class="stock-bar-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div></div>'
+    + '<div class="rx-row"><span class="rx-label">現在在庫</span><span>' + stockUnit + ' 単位</span></div>'
+    + '<div class="rx-row"><span class="rx-label">使用頻度</span><span>' + (p.frequency || '-') + '</span></div>'
+    + '<div class="rx-row"><span class="rx-label">1回使用量</span><span>' + (p.dailyAmount || '-') + ' 単位</span></div>'
+    + '<div class="rx-row"><span class="rx-label">枯渇予定日</span><span class="' + depClass2 + '">' + (p.effectiveDepletionDate || '-') + '</span></div>'
+    + expireWarn
+    + '</div>'
+    + actions
+    + '</div>';
+}
+
+// ============================================================
+// ログ入力モーダル
+// ============================================================
+function openLogModal(prescriptionId, action, medicineName) {
+  document.getElementById('logPrescriptionId').value = prescriptionId;
+  document.getElementById('logModalTitle').textContent = medicineName;
+  document.getElementById('logAction').value = action;
+  document.getElementById('logDate').value = todayStr();
+  document.getElementById('logMemo').value = '';
+  document.getElementById('logBottles').value = '';
+  document.getElementById('logNewStock').value = '';
+  document.getElementById('logNewDailyAmount').value = '';
+  onLogActionChange();
+  openModal('logModal');
+}
+
+function onLogActionChange() {
+  var action = document.getElementById('logAction').value;
+  ['処方受取','残数確認','用量変更'].forEach(function(a) {
+    var el = document.getElementById('logSection-' + a);
+    if (el) el.style.display = (a === action) ? '' : 'none';
+  });
+}
+
+async function submitLog() {
+  var prescriptionId = document.getElementById('logPrescriptionId').value;
+  var action         = document.getElementById('logAction').value;
+  var date           = document.getElementById('logDate').value;
+  var memo           = document.getElementById('logMemo').value;
+
+  var body = { prescriptionId: prescriptionId, action: action, date: date, memo: memo };
+
+  if (action === '処方受取') {
+    var b = document.getElementById('logBottles').value;
+    if (!b || isNaN(b)) { toast('本数を入力してください'); return; }
+    body.bottles       = parseFloat(b);
+    body.nextVisitDate = document.getElementById('logNextVisit').value || '';
+  } else if (action === '残数確認') {
+    var s = document.getElementById('logNewStock').value;
+    if (!s || isNaN(s)) { toast('在庫数を入力してください'); return; }
+    body.newStock = parseFloat(s);
+  } else if (action === '用量変更') {
+    var d = document.getElementById('logNewDailyAmount').value;
+    if (!d || isNaN(d)) { toast('新しい使用量を入力してください'); return; }
+    body.newDailyAmount = parseFloat(d);
+    body.frequency      = document.getElementById('logNewFrequency').value;
+  }
+
+  try {
+    await api('addLog', null, body);
+    toast('✓ ' + action + 'を記録しました');
+    closeModal('logModal');
+    if (currentPatient) {
+      loading('patientContent');
+      var prescriptions = await api('getPrescriptions', { patientId: currentPatient.patientId });
+      renderPatientDetail(currentPatient, prescriptions);
+    }
+  } catch(e) {
+    toast('エラー: ' + e.message);
+  }
+}
+
+// ============================================================
+// 履歴モーダル
+// ============================================================
+async function showHistory(prescriptionId) {
+  openModal('historyModal');
+  document.getElementById('historyContent').innerHTML = '<div class="loading"><div class="spinner"></div>読み込み中...</div>';
+  try {
+    var logs = await api('getLogs', { prescriptionId: prescriptionId });
+    renderHistory(logs);
+  } catch(e) {
+    document.getElementById('historyContent').innerHTML = '<div style="color:red">エラー: ' + e.message + '</div>';
+  }
+}
+
+function renderHistory(logs) {
+  if (!logs || !logs.length) {
+    document.getElementById('historyContent').innerHTML = '<div class="empty-state">記録がありません</div>';
+    return;
+  }
+  var colors = { '処方受取': '#1a6fbf', '残数確認': '#2e7d32', '用量変更': '#e65100', '中止': '#c62828' };
+  document.getElementById('historyContent').innerHTML = logs.map(function(l) {
+    var color = colors[l.action] || '#3d4d5c';
+    return '<div style="padding:10px 0;border-bottom:1px solid #e8ecf0;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+      + '<span style="font-weight:700;color:' + color + '">' + l.action + '</span>'
+      + '<span style="font-size:13px;color:#9aa5b4">' + (l.date || '') + '</span>'
+      + '</div>'
+      + (l.bottles ? '<div style="font-size:13px">受取本数: <b>' + l.bottles + '</b>本</div>' : '')
+      + (l.stockAfter !== '' && l.stockAfter !== undefined && l.stockAfter !== null ? '<div style="font-size:13px">確定在庫: <b>' + parseFloat(l.stockAfter).toFixed(1) + '</b>単位</div>' : '')
+      + (l.newDailyAmount ? '<div style="font-size:13px">変更後使用量: <b>' + l.newDailyAmount + '</b>単位/回</div>' : '')
+      + (l.depletionDate ? '<div style="font-size:13px;color:#9aa5b4">枯渇予定: ' + l.depletionDate + '</div>' : '')
+      + (l.memo ? '<div style="font-size:13px;color:#9aa5b4;margin-top:2px">' + l.memo + '</div>' : '')
+      + '</div>';
+  }).join('');
+}
+
+// ============================================================
+// 往診ページ
+// ============================================================
+var hospitals = [];
+var hospitalsLoaded = false;
+
+async function loadHospitals() {
+  if (hospitalsLoaded) return;
+  try {
+    hospitals = await api('getHospitals');
+    var sel1 = document.getElementById('visitHospital');
+    var sel2 = document.getElementById('planFilterHospital');
+    hospitals.forEach(function(h) {
+      var label = h.hospitalName + '（' + h.facilityName + '）';
+      sel1.innerHTML += '<option value="' + h.hospitalId + '">' + label + '</option>';
+      sel2.innerHTML += '<option value="' + h.hospitalId + '">' + label + '</option>';
+    });
+    hospitalsLoaded = true;
+  } catch(e) { console.error(e); }
+}
+
+function setDefaultDates() {
+  var today = new Date();
+  var twoWeeks = new Date(today.getTime() + 14 * 86400000);
+  document.getElementById('visitDate').value = todayStr();
+  document.getElementById('nextVisitDate').value = dateToStr(twoWeeks);
+}
+
+function setNextVisitDays(days) {
+  // 今回往診日を基準に日数を加算（未入力なら今日を基準）
+  var baseStr = document.getElementById('visitDate').value;
+  var base = baseStr ? new Date(baseStr) : new Date();
+  base.setHours(0, 0, 0, 0);
+  var next = new Date(base.getTime() + days * 86400000);
+  document.getElementById('nextVisitDate').value = dateToStr(next);
+}
+
+function switchVisitTab(tab) {
+  document.getElementById('visitCalcSection').style.display  = tab === 'calc'  ? '' : 'none';
+  document.getElementById('visitPlansSection').style.display = tab === 'plans' ? '' : 'none';
+  document.getElementById('tab-calc').classList.toggle('active',  tab === 'calc');
+  document.getElementById('tab-plans').classList.toggle('active', tab === 'plans');
+  if (tab === 'plans') loadVisitPlans();
+}
+
+async function calcVisit() {
+  var hospitalId    = document.getElementById('visitHospital').value;
+  var visitDate     = document.getElementById('visitDate').value;
+  var nextVisitDate = document.getElementById('nextVisitDate').value;
+
+  if (!hospitalId)    { toast('病院を選択してください');       return; }
+  if (!visitDate)     { toast('往診日を入力してください');     return; }
+  if (!nextVisitDate) { toast('次回往診日を入力してください'); return; }
+
+  loading('visitResults');
+  try {
+    var result = await api('calcVisitPrescription', null, {
+      hospitalId: hospitalId,
+      visitDate: visitDate.replace(/-/g,'/'),
+      nextVisitDate: nextVisitDate.replace(/-/g,'/')
+    });
+    renderVisitResults(result);
+  } catch(e) {
+    document.getElementById('visitResults').innerHTML = '<div class="card" style="color:red">エラー: ' + e.message + '</div>';
+  }
+}
+
+function renderVisitResults(result) {
+  var el = document.getElementById('visitResults');
+  if (!result.patients || !result.patients.length) {
+    el.innerHTML = '<div class="empty-state">対象患者が見つかりません</div>';
+    return;
+  }
+
+  // 往診予定を自動保存
+  api('addVisitPlan', null, { hospitalId: result.hospitalId, visitDate: result.visitDate, nextVisitDate: result.nextVisitDate }).catch(function(){});
+
+  var html = '<div class="card" style="background:#e3f2fd;border:none;margin-top:12px">'
+    + '<div style="font-size:13px;color:#1a6fbf">'
+    + '往診日: <b>' + result.visitDate + '</b>　'
+    + '次回: <b>' + result.nextVisitDate + '</b>　'
+    + '目標日: <b>' + result.targetDate + '</b>（次回+7日）'
+    + '</div></div>';
+
+  // 針の合計を患者ごとに集計
+  var totalNeedlesByPatient = {};
+
+  result.patients.forEach(function(pt) {
+    var totalNeedles = 0;
+
+    var meds = pt.prescriptions.map(function(m) {
+      var warn = m.warning ? '<div style="font-size:11px;color:#e65100;margin-top:2px">&#9888; ' + m.warning + '</div>' : '';
+
+      // 現在の在庫状況（処方前）
+      var depColor = '#9aa5b4';
+      var depLabel = '在庫切れ';
+      if (m.currentDaysLeft !== null && m.currentDaysLeft !== undefined) {
+        if (m.currentDaysLeft <= 7)       { depColor = '#c62828'; depLabel = 'あと' + m.currentDaysLeft + '日'; }
+        else if (m.currentDaysLeft <= 14) { depColor = '#e65100'; depLabel = 'あと' + m.currentDaysLeft + '日'; }
+        else                              { depColor = '#2e7d32'; depLabel = 'あと' + m.currentDaysLeft + '日'; }
+      }
+      var currentDepStr = m.currentDepletionDate
+        ? '<span style="color:' + depColor + ';font-weight:700">' + m.currentDepletionDate + '（' + depLabel + '）</span>'
+        : '<span style="color:#c62828;font-weight:700">在庫切れ</span>';
+
+      // 処方後の枯渇予定日
+      var afterDepStr = m.depletionDateAfter
+        ? '<span style="color:#1a6fbf;font-weight:700">' + m.depletionDateAfter + '</span>'
+        : '-';
+
+      // 薬品タイプ判定（注射薬フラグ）
+      var isInjection = (m.medicineType === '注射薬');
+
+      // 投与間隔・回数の計算
+      var freq = m.frequency || '';
+      var onceAmount = parseFloat(m.dailyAmount) || 0; // 1回投与量
+
+      var intervalDays = 1;
+      var timesPerDay  = 1;
+      if      (freq === '毎日')  { intervalDays = 1;   timesPerDay = 1; }
+      else if (freq === '週2回') { intervalDays = 3.5; timesPerDay = 2/7; }
+      else if (freq === '週1回') { intervalDays = 7;   timesPerDay = 1/7; }
+      else if (freq === '月1回') { intervalDays = 30;  timesPerDay = 1/30; }
+      else {
+        var wMatch = freq.match(/週(\d+)回/);
+        if (wMatch) { var wn = parseInt(wMatch[1]); intervalDays = 7/wn; timesPerDay = wn/7; }
+      }
+
+      // 1本あたり何日持つか
+      var daysPerBottle = (onceAmount > 0) ? (m.capacity / onceAmount * intervalDays) : 0;
+      // 1日あたり使用単位数（平均）
+      var dailyUseUnits = intervalDays > 0 ? onceAmount / intervalDays : 0;
+
+      // 針の計算（注射薬のみ）
+      var needlesPerBottle  = daysPerBottle * timesPerDay;
+      var needlesForThisMed = (isInjection && m.requiredBottles > 0 && needlesPerBottle > 0)
+        ? Math.ceil(m.requiredBottles * needlesPerBottle) : 0;
+      if (isInjection) totalNeedles += needlesForThisMed;
+
+      // 表示用
+      var daysPerBottleStr  = daysPerBottle > 0 ? Math.round(daysPerBottle) + '日/本' : '-';
+      var dailyUseStr       = dailyUseUnits > 0 ? (Math.round(dailyUseUnits * 10) / 10) + '単位/日' : '-';
+
+      var needleInfo = '';
+      if (isInjection && m.requiredBottles > 0 && needlesForThisMed > 0) {
+        needleInfo = '<div style="background:#f3e5f5;border-radius:6px;padding:5px 10px;font-size:12px;margin-top:4px">'
+          + '💉 針: ' + Math.round(needlesPerBottle) + '本/本 × ' + m.requiredBottles + '本 = <b>' + needlesForThisMed + '本</b>'
+          + '</div>';
+      }
+
+      return '<div class="visit-med-row" style="flex-direction:column;align-items:stretch;gap:6px;padding:12px 14px">'
+        + '<div style="display:flex;align-items:center;gap:8px">'
+        + '<div class="visit-med-name">'
+        + '<div style="font-weight:700">' + m.medicineName + (isInjection ? ' <span style="font-size:10px;background:#e3f2fd;color:#1a6fbf;padding:1px 5px;border-radius:4px">注射</span>' : '') + '</div>'
+        + '<div style="font-size:11px;color:#9aa5b4">'
+        + freq + ' / <b style="color:#555">' + dailyUseStr + '</b> / <b style="color:#555">' + daysPerBottleStr + '</b>'
+        + ' / 在庫: ' + parseFloat(m.currentStock).toFixed(1) + '単位'
+        + ' / 1本' + m.capacity + '単位'
+        + (m.expireDays < 999 ? ' / 開封後' + m.expireDays + '日' : '')
+        + '</div>'
+        + '</div>'
+        + '<div class="visit-bottles">' + m.requiredBottles + '<span>本</span></div>'
+        + '</div>'
+        + '<div style="background:#f5f7fa;border-radius:6px;padding:6px 10px;font-size:12px;display:flex;gap:12px;flex-wrap:wrap">'
+        + '<div>📦 現在の在庫: ' + currentDepStr + 'まで</div>'
+        + '<div>✅ 処方後: ' + afterDepStr + 'まで</div>'
+        + '</div>'
+        + needleInfo
+        + warn
+        + '</div>';
+    }).join('');
+
+    // 針の合計（14本単位に切り上げ）
+    var needlePacks = Math.ceil(totalNeedles / 14);
+    var needleTotal14 = needlePacks * 14;
+    var needleSummary = totalNeedles > 0
+      ? '<div style="background:#ede7f6;border-radius:8px;padding:8px 14px;font-size:13px;margin:4px 0 0 0;display:flex;justify-content:space-between;align-items:center">'
+        + '<span>💉 針の合計（14本単位）</span>'
+        + '<span><b style="font-size:16px;color:#6a1b9a">' + needleTotal14 + '本</b>'
+        + ' <span style="font-size:11px;color:#9aa5b4">（最低' + totalNeedles + '本 → ' + needlePacks + '袋）</span></span>'
+        + '</div>'
+      : '';
+
+    html += '<div class="visit-patient-block">'
+      + '<div class="visit-patient-name">' + pt.patientName + '</div>'
+      + meds
+      + needleSummary
+      + '</div>';
+  });
+
+  el.innerHTML = html;
+  toast('✓ 計算完了・往診予定を保存しました');
+}
+
+async function loadVisitPlans() {
+  loading('visitPlansList');
+  var hospitalId = document.getElementById('planFilterHospital').value || undefined;
+  try {
+    var params = hospitalId ? { hospitalId: hospitalId } : {};
+    var plans = await api('getVisitPlans', params);
+    renderVisitPlans(plans);
+  } catch(e) {
+    document.getElementById('visitPlansList').innerHTML = '<div class="card" style="color:red">エラー: ' + e.message + '</div>';
+  }
+}
+
+function renderVisitPlans(plans) {
+  var el = document.getElementById('visitPlansList');
+  if (!plans || !plans.length) {
+    el.innerHTML = '<div class="empty-state">往診予定がありません</div>';
+    return;
+  }
+  var hospMap = {};
+  hospitals.forEach(function(h) { hospMap[h.hospitalId] = h.hospitalName + '（' + h.facilityName + '）'; });
+  el.innerHTML = plans.map(function(p) {
+    return '<div class="card" style="margin-top:8px">'
+      + '<div style="font-weight:700;margin-bottom:4px">' + (hospMap[p.hospitalId] || p.hospitalId) + '</div>'
+      + '<div style="font-size:13px">往診日: <b>' + p.visitDate + '</b></div>'
+      + '<div style="font-size:13px">次回予定: <b>' + p.nextVisitDate + '</b></div>'
+      + '</div>';
+  }).join('');
+}
+
+// ============================================================
+// モーダル制御
+// ============================================================
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(function(el) {
+  el.addEventListener('click', function(e) {
+    if (e.target === this) this.classList.remove('open');
+  });
+});
+</script>
+</body>
+</html>
