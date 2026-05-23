@@ -914,8 +914,8 @@ function renderVisitResults(result) {
         ? '<span style="color:#1a6fbf;font-weight:700">' + m.depletionDateAfter + '</span>'
         : '-';
 
-      // 薬品タイプ判定（注射薬フラグ）
-      var isInjection = (m.medicineType === '注射薬');
+      // 薬品タイプ判定（注射フラグ）
+      var isInjection = (m.medicineType === '注射' || m.medicineType === '注射薬');
 
       // 投与間隔・回数の計算
       var freq = m.frequency || '';
@@ -1067,7 +1067,7 @@ var MASTER_DEF = {
     fields: [
       { key: '薬品ID',         label: '薬品ID',       type: 'text',   required: true,  readonly: 'edit' },
       { key: '薬品名',         label: '薬品名',       type: 'text',   required: true  },
-      { key: '種類',           label: '種類',         type: 'select', required: false, options: ['注射薬', '吸入薬', '経口薬', 'その他'] },
+      { key: '種類',           label: '種類',         type: 'select', required: false, options: ['注射', '吸入薬', '経口薬', 'その他'] },
       { key: '1本容量',        label: '1本容量（単位）', type: 'number', required: false },
       { key: '開封後有効日数', label: '開封後有効日数（期限なしは999）', type: 'number', required: false },
     ],
@@ -1154,14 +1154,14 @@ function renderMasterList(type, data, query) {
 
   // 薬品は種類でグループ分け、それ以外は50音順
   if (type === 'medicine') {
-    var groups = { '注射薬': [], '吸入薬': [], '経口薬': [], 'その他': [] };
+    var groups = { '注射': [], '吸入薬': [], '経口薬': [], 'その他': [] };
     filtered.forEach(function(r) {
       var kind = r['種類'] || 'その他';
       if (!groups[kind]) groups[kind] = [];
       groups[kind].push(r);
     });
     var html = '';
-    ['注射薬', '吸入薬', '経口薬', 'その他'].forEach(function(kind) {
+    ['注射', '吸入薬', '経口薬', 'その他'].forEach(function(kind) {
       var rows = groups[kind];
       if (!rows || !rows.length) return;
       rows = sortByLabel(rows, labelFn);
