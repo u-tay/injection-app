@@ -1162,70 +1162,176 @@ function visitPrintPDF() {
     + '&visitDate=' + encodeURIComponent(r.visitDate)
     + '&nextVisitDate=' + encodeURIComponent(r.nextVisitDate);
   var qrUrl = appUrl + qrParam;
-  var qrApiUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=' + encodeURIComponent(qrUrl);
+  var qrApiUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=' + encodeURIComponent(qrUrl);
 
   var hospName = '';
   hospitals.forEach(function(h) { if (h.hospitalId === r.hospitalId) hospName = h.hospitalName + '（' + h.facilityName + '）'; });
 
-  var rows = '';
+  // 患者ごとのブロックHTMLを生成
+  var patientBlocks = '';
   r.patients.forEach(function(pt) {
-    (pt.prescriptions || []).forEach(function(m) {
+    var prescriptions = pt.prescriptions || [];
+    // 必要本数が0でも枯渇が近い場合は含める（全薬品表示）
+    var medRows = '';
+    var ptTotalNeedles = 0;
+    var ptNeedlePacks  = 0;
+
+    prescriptions.forEach(function(m) {
       var pid = m.prescriptionId || '';
       var bottles = visitBottleOverrides[pid] !== undefined ? visitBottleOverrides[pid] : m.requiredBottles;
-      if (bottles === 0 && m.requiredBottles === 0) return; // 0本は省略
+      var changed = visitBottleOverrides[pid] !== undefined && visitBottleOverrides[pid] !== m.requiredBottles;
       var isInjection = (m.medicineType === '注射' || m.medicineType === '注射薬');
       var freq = m.frequency || '';
       var onceAmount = parseFloat(m.dailyAmount) || 0;
+
       var intervalDays = 1; var timesPerDay = 1;
       if      (freq === '毎日')  { intervalDays = 1;   timesPerDay = 1; }
       else if (freq === '週2回') { intervalDays = 3.5; timesPerDay = 2/7; }
       else if (freq === '週1回') { intervalDays = 7;   timesPerDay = 1/7; }
       else if (freq === '月1回') { intervalDays = 30;  timesPerDay = 1/30; }
-      var daysPerBottle = (onceAmount > 0) ? (m.capacity / onceAmount * intervalDays) : 0;
-      var needles = 0;
-      if (isInjection && daysPerBottle > 0 && bottles > 0) {
-        needles = Math.ceil(daysPerBottle * timesPerDay * bottles);
+      else {
+        var wm = freq.match(/週(\d+)回/);
+        if (wm) { var wn = parseInt(wm[1]); intervalDays = 7/wn; timesPerDay = wn/7; }
       }
-      var needleStr = (isInjection && needles > 0) ? ' / 針' + needles + '本' : '';
-      var changed = visitBottleOverrides[pid] !== undefined && visitBottleOverrides[pid] !== m.requiredBottles;
-      rows += '<tr>'
-        + '<td style="padding:4px 8px;border:1px solid #ccc">' + escapeHtml(pt.patientName) + '</td>'
-        + '<td style="padding:4px 8px;border:1px solid #ccc">' + escapeHtml(m.medicineName) + '</td>'
-        + '<td style="padding:4px 8px;border:1px solid #ccc;text-align:center">' + freq + '</td>'
-        + '<td style="padding:4px 8px;border:1px solid #ccc;text-align:center;font-weight:700;color:' + (changed ? '#e65100' : '#000') + '">'
-        + bottles + '本' + (changed ? '✎' : '') + needleStr + '</td>'
-        + '<td style="padding:4px 8px;border:1px solid #ccc">' + (m.currentDepletionDate || '-') + ' → ' + (m.depletionDateAfter || '-') + '</td>'
+
+      var capacity = parseFloat(m.capacity) || 0;
+      var daysPerBottle = (onceAmount > 0 && intervalDays > 0) ? (capacity / onceAmount * intervalDays) : 0;
+      var dailyUseUnits = intervalDays > 0 ? onceAmount / intervalDays : 0;
+
+      // 針計算
+      var needlesTotal = 0;
+      var needlePacks  = 0;
+      if (isInjection && daysPerBottle > 0 && bottles > 0) {
+        needlesTotal = Math.ceil(daysPerBottle * timesPerDay * bottles);
+        needlePacks  = Math.ceil(needlesTotal / 14);
+        ptTotalNeedles += needlesTotal;
+      }
+
+      // 在庫表示
+      var stockVal = parseFloat(m.currentStock);
+      var stockStr = (!isNaN(stockVal) && stockVal >= 0) ? parseFloat(stockVal.toFixed(3)).toString() + '単位' : '-';
+
+      // 表示用文字列
+      var onceStr       = onceAmount > 0 ? parseFloat(onceAmount.toFixed(3)).toString() + '単位' : '-';
+      var dailyStr      = dailyUseUnits > 0 ? parseFloat(dailyUseUnits.toFixed(3)).toString() + '単位/日' : '-';
+      var dpbStr        = daysPerBottle > 0 ? (Math.round(daysPerBottle * 10) / 10) + '日/本' : '-';
+      var capStr        = capacity > 0 ? '1本' + capacity + '単位' : '-';
+      var expStr        = (m.expireDays && m.expireDays < 999) ? '開封後' + m.expireDays + '日' : '期限なし';
+      var bottleColor   = bottles > 0 ? (changed ? '#e65100' : '#1a3f6b') : '#888';
+      var bottleLabel   = bottles > 0 ? bottles + '本' + (changed ? '✎' : '') : '処方不要';
+      var needleCell    = (isInjection && needlesTotal > 0)
+        ? needlesTotal + '本（' + needlePacks + 'パック）'
+        : (isInjection ? '-' : '対象外');
+      var depBefore = m.currentDepletionDate || '在庫切れ';
+      var depAfter  = m.depletionDateAfter   || (bottles > 0 ? '-' : '処方なし');
+
+      // 枯渇日の色
+      var depBeforeColor = '#333';
+      if (m.currentDaysLeft !== null && m.currentDaysLeft !== undefined) {
+        if (m.currentDaysLeft <= 7)       depBeforeColor = '#c62828';
+        else if (m.currentDaysLeft <= 14) depBeforeColor = '#e65100';
+        else                              depBeforeColor = '#2e7d32';
+      } else if (!m.currentDepletionDate) {
+        depBeforeColor = '#c62828';
+      }
+
+      medRows += '<tr>'
+        // 薬品名
+        + '<td style="padding:5px 8px;border:1px solid #d0d7de;vertical-align:top">'
+        +   '<div style="font-weight:700;font-size:9.5pt">' + escapeHtml(m.medicineName)
+        +     (isInjection ? ' <span style="font-size:7.5pt;background:#e3f2fd;color:#1a6fbf;padding:1px 4px;border-radius:3px">注射</span>' : '')
+        +   '</div>'
+        +   '<div style="font-size:8pt;color:#666;margin-top:2px">' + freq + '　' + capStr + '　' + expStr + '</div>'
+        + '</td>'
+        // 現在在庫・使用量
+        + '<td style="padding:5px 8px;border:1px solid #d0d7de;vertical-align:top;font-size:8.5pt">'
+        +   '<div>在庫: <b>' + stockStr + '</b></div>'
+        +   '<div>1回: ' + onceStr + '</div>'
+        +   '<div>1日: ' + dailyStr + '</div>'
+        +   '<div>1本: ' + dpbStr + '</div>'
+        + '</td>'
+        // 必要本数
+        + '<td style="padding:5px 8px;border:1px solid #d0d7de;text-align:center;vertical-align:middle">'
+        +   '<div style="font-size:14pt;font-weight:700;color:' + bottleColor + '">' + bottleLabel + '</div>'
+        + '</td>'
+        // 針
+        + '<td style="padding:5px 8px;border:1px solid #d0d7de;text-align:center;vertical-align:middle;font-size:8.5pt">'
+        +   needleCell
+        + '</td>'
+        // 枯渇日（前→後）
+        + '<td style="padding:5px 8px;border:1px solid #d0d7de;vertical-align:top;font-size:8.5pt">'
+        +   '<div>処方前: <span style="font-weight:700;color:' + depBeforeColor + '">' + escapeHtml(depBefore) + '</span></div>'
+        +   '<div>処方後: <span style="font-weight:700;color:#1a6fbf">' + escapeHtml(depAfter) + '</span></div>'
+        + '</td>'
         + '</tr>';
     });
+
+    ptNeedlePacks = Math.ceil(ptTotalNeedles / 14);
+
+    // 患者ブロック
+    patientBlocks += '<div style="margin-bottom:12px;break-inside:avoid;page-break-inside:avoid">'
+      // 患者ヘッダー
+      + '<div style="background:#1a6fbf;color:#fff;padding:6px 10px;border-radius:4px 4px 0 0;display:flex;justify-content:space-between;align-items:center">'
+      +   '<span style="font-weight:700;font-size:11pt">' + escapeHtml(pt.patientName) + '</span>'
+      +   (ptTotalNeedles > 0
+          ? '<span style="font-size:8.5pt">💉 針合計: ' + ptTotalNeedles + '本（' + ptNeedlePacks + 'パック / 14本×）</span>'
+          : '')
+      + '</div>'
+      // 薬品テーブル
+      + '<table style="width:100%;border-collapse:collapse;font-size:9pt">'
+      +   '<thead><tr style="background:#e8f0f9">'
+      +     '<th style="padding:4px 8px;border:1px solid #d0d7de;font-weight:600;text-align:left;width:28%">薬品名</th>'
+      +     '<th style="padding:4px 8px;border:1px solid #d0d7de;font-weight:600;text-align:left;width:24%">在庫・使用量</th>'
+      +     '<th style="padding:4px 8px;border:1px solid #d0d7de;font-weight:600;text-align:center;width:12%">必要本数</th>'
+      +     '<th style="padding:4px 8px;border:1px solid #d0d7de;font-weight:600;text-align:center;width:14%">針</th>'
+      +     '<th style="padding:4px 8px;border:1px solid #d0d7de;font-weight:600;text-align:left">枯渇日（前→後）</th>'
+      +   '</tr></thead>'
+      +   '<tbody>' + medRows + '</tbody>'
+      + '</table>'
+      + '</div>';
   });
 
   var win = window.open('', '_blank');
   win.document.write('<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">'
     + '<title>往診処方一覧 ' + r.visitDate + '</title>'
     + '<style>'
-    + 'body{font-family:"Hiragino Sans","Yu Gothic UI",sans-serif;font-size:11pt;margin:12mm;}'
-    + 'h2{font-size:14pt;margin:0 0 4px}h3{font-size:11pt;margin:0 0 8px;color:#555}'
-    + 'table{width:100%;border-collapse:collapse;font-size:10pt}'
-    + 'th{background:#1a6fbf;color:#fff;padding:5px 8px;border:1px solid #1a6fbf;font-size:10pt}'
-    + 'tr:nth-child(even){background:#f5f7fa}'
-    + '.info{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}'
-    + '.qr img{display:block}'
-    + '@media print{body{margin:8mm}button{display:none}}'
+    + 'body{font-family:"Hiragino Sans","Yu Gothic UI",sans-serif;font-size:10pt;margin:10mm 12mm;color:#222}'
+    + 'h2{font-size:15pt;font-weight:700;margin:0 0 3px}'
+    + 'h3{font-size:10.5pt;margin:0 0 4px;color:#444;font-weight:600}'
+    + '.header-row{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;border-bottom:2px solid #1a6fbf;padding-bottom:8px}'
+    + '.meta{font-size:9pt;color:#555;margin-top:4px}'
+    + '.meta b{color:#1a6fbf}'
+    + '.qr-box{text-align:center}'
+    + '.qr-box img{display:block;margin:0 auto}'
+    + '.qr-box div{font-size:7.5pt;color:#888;margin-top:2px}'
+    + '.footer{margin-top:10px;font-size:8.5pt;color:#888;border-top:1px solid #ddd;padding-top:6px}'
+    + '@media print{body{margin:6mm 8mm}button{display:none!important}}'
     + '</style></head><body>'
-    + '<div class="info">'
-    + '<div>'
-    + '<h2>往診処方一覧</h2>'
-    + '<h3>' + escapeHtml(hospName) + '</h3>'
-    + '<div style="font-size:10pt">往診日: <b>' + r.visitDate + '</b>　次回: <b>' + r.nextVisitDate + '</b>　目標日: <b>' + r.targetDate + '</b></div>'
+    // ヘッダー
+    + '<div class="header-row">'
+    +   '<div>'
+    +     '<h2>往診処方一覧</h2>'
+    +     '<h3>' + escapeHtml(hospName) + '</h3>'
+    +     '<div class="meta">'
+    +       '往診日: <b>' + r.visitDate + '</b>　'
+    +       '次回往診: <b>' + r.nextVisitDate + '</b>　'
+    +       '目標日: <b>' + r.targetDate + '</b>（次回+7日）'
+    +     '</div>'
+    +   '</div>'
+    +   '<div class="qr-box">'
+    +     '<img src="' + qrApiUrl + '" width="110" height="110" alt="QR">'
+    +     '<div>アプリで開く</div>'
+    +   '</div>'
     + '</div>'
-    + '<div class="qr"><img src="' + qrApiUrl + '" width="100" height="100" alt="QR"><div style="font-size:8pt;text-align:center;color:#555">アプリで開く</div></div>'
+    // 患者ブロック
+    + patientBlocks
+    // フッター
+    + '<div class="footer">'
+    +   '印刷日時: ' + new Date().toLocaleString('ja-JP') + '　　'
+    +   '✎=本数変更あり　💉=注射薬（針14本/パック）　枯渇日は在庫シミュレーションによる算出値'
     + '</div>'
-    + '<table><thead><tr>'
-    + '<th>患者名</th><th>薬品名</th><th>頻度</th><th>必要本数</th><th>枯渇日（前→後）</th>'
-    + '</tr></thead><tbody>' + rows + '</tbody></table>'
-    + '<div style="margin-top:10px;font-size:9pt;color:#888">印刷日時: ' + new Date().toLocaleString('ja-JP') + '　✎=本数変更あり</div>'
-    + '<div style="margin-top:12px;text-align:center">'
-    + '<button onclick="window.print()" style="padding:10px 30px;font-size:13pt;background:#1a6fbf;color:#fff;border:none;border-radius:6px;cursor:pointer">🖨 印刷する</button>'
+    + '<div style="margin-top:10px;text-align:center">'
+    +   '<button onclick="window.print()" style="padding:10px 36px;font-size:13pt;background:#1a6fbf;color:#fff;border:none;border-radius:6px;cursor:pointer">🖨 印刷する</button>'
     + '</div>'
     + '</body></html>');
   win.document.close();
@@ -1290,58 +1396,107 @@ function renderVisitPlanDetailResult(result) {
     el.innerHTML = '<div class="empty-state">対象患者が見つかりません</div>';
     return;
   }
+
   var html = '<div style="background:#e3f2fd;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:13px;color:#1a6fbf">'
     + '往診日: <b>' + result.visitDate + '</b>　次回: <b>' + result.nextVisitDate + '</b>　目標日: <b>' + result.targetDate + '</b>（次回+7日）'
     + '</div>';
 
   result.patients.forEach(function(pt) {
-    // 針の合計
     var totalNeedles = 0;
-    var drugsHtml = '';
-    (pt.drugs || []).forEach(function(m) {
-      var isInjection = (m.medicineType === '注射' || m.medicineType === '注射薬');
-      var bottles = m.requiredBottles || 0;
-      var sufficient = m.sufficient;
-      var statusColor = sufficient ? '#2e7d32' : '#c62828';
-      var statusLabel = sufficient ? '在庫十分' : '要処方';
-      var daysPerBottle = (m.bottleSize && m.dailyUseUnits > 0) ? m.bottleSize / m.dailyUseUnits : 0;
-      var daysPerBottleStr = daysPerBottle > 0 ? (Math.round(daysPerBottle * 10) / 10) + '日/本' : '-';
-      var dailyUseStr = m.dailyUseUnits > 0 ? (parseFloat(m.dailyUseUnits.toFixed(3)).toString()) + '単位/日' : '-';
-      var onceAmountStr = m.onceAmount > 0 ? (parseFloat(m.onceAmount.toFixed(3)).toString()) + '単位/回' : '-';
-      var needleStr = '';
-      if (isInjection && m.timesPerDay > 0 && daysPerBottle > 0) {
-        var needlesPerBottle = Math.ceil(daysPerBottle) * m.timesPerDay;
-        var totalN = needlesPerBottle * bottles;
-        var packs = Math.ceil(totalN / 14);
-        totalNeedles += totalN;
-        needleStr = '<div style="font-size:12px;color:#1a6fbf;margin-top:2px">針: ' + totalN + '本（' + packs + 'パック）</div>';
+
+    var meds = (pt.prescriptions || []).map(function(m) {
+      var warn = m.warning ? '<div style="font-size:11px;color:#e65100;margin-top:2px">&#9888; ' + m.warning + '</div>' : '';
+
+      // 現在の在庫状況（処方前）
+      var depColor = '#9aa5b4';
+      var depLabel = '在庫切れ';
+      if (m.currentDaysLeft !== null && m.currentDaysLeft !== undefined) {
+        if (m.currentDaysLeft <= 7)       { depColor = '#c62828'; depLabel = 'あと' + m.currentDaysLeft + '日'; }
+        else if (m.currentDaysLeft <= 14) { depColor = '#e65100'; depLabel = 'あと' + m.currentDaysLeft + '日'; }
+        else                              { depColor = '#2e7d32'; depLabel = 'あと' + m.currentDaysLeft + '日'; }
       }
-      drugsHtml += '<div style="background:#f5f7fa;border-radius:8px;padding:8px 10px;margin-bottom:6px">'
-        + '<div style="display:flex;justify-content:space-between;align-items:center">'
-        + '<span style="font-weight:700;font-size:14px">' + escapeHtml(m.medicineName) + '</span>'
-        + '<span style="font-size:12px;color:' + statusColor + ';font-weight:700">' + (bottles > 0 ? bottles + '本' : '不要') + '　' + statusLabel + '</span>'
+      var currentDepStr = m.currentDepletionDate
+        ? '<span style="color:' + depColor + ';font-weight:700">' + m.currentDepletionDate + '（' + depLabel + '）</span>'
+        : '<span style="color:#c62828;font-weight:700">在庫切れ</span>';
+      var afterDepStr = m.depletionDateAfter
+        ? '<span style="color:#1a6fbf;font-weight:700">' + m.depletionDateAfter + '</span>'
+        : '-';
+
+      var isInjection = (m.medicineType === '注射' || m.medicineType === '注射薬');
+      var freq = m.frequency || '';
+      var onceAmount = parseFloat(m.dailyAmount) || 0;
+
+      var intervalDays = 1; var timesPerDay = 1;
+      if      (freq === '毎日')  { intervalDays = 1;   timesPerDay = 1; }
+      else if (freq === '週2回') { intervalDays = 3.5; timesPerDay = 2/7; }
+      else if (freq === '週1回') { intervalDays = 7;   timesPerDay = 1/7; }
+      else if (freq === '月1回') { intervalDays = 30;  timesPerDay = 1/30; }
+      else {
+        var wMatch = freq.match(/週(\d+)回/);
+        if (wMatch) { var wn = parseInt(wMatch[1]); intervalDays = 7/wn; timesPerDay = wn/7; }
+      }
+
+      var daysPerBottle = (onceAmount > 0) ? (m.capacity / onceAmount * intervalDays) : 0;
+      var dailyUseUnits = intervalDays > 0 ? onceAmount / intervalDays : 0;
+
+      var needlesPerBottle  = daysPerBottle * timesPerDay;
+      var needlesForThisMed = (isInjection && m.requiredBottles > 0 && needlesPerBottle > 0)
+        ? Math.ceil(m.requiredBottles * needlesPerBottle) : 0;
+      if (isInjection) totalNeedles += needlesForThisMed;
+
+      var daysPerBottleStr = daysPerBottle > 0 ? (Math.round(daysPerBottle * 10) / 10) + '日/本' : '-';
+      var dailyUseStr      = dailyUseUnits > 0 ? (parseFloat(dailyUseUnits.toFixed(3)).toString()) + '単位/日' : '-';
+      var onceAmountStr    = onceAmount > 0 ? (parseFloat(onceAmount.toFixed(3)).toString()) + '単位/回' : '-';
+
+      var needleInfo = '';
+      if (isInjection && m.requiredBottles > 0 && needlesForThisMed > 0) {
+        needleInfo = '<div style="background:#f3e5f5;border-radius:6px;padding:5px 10px;font-size:12px;margin-top:4px">'
+          + '💉 針: ' + Math.round(needlesPerBottle) + '本/本 × ' + m.requiredBottles + '本 = <b>' + needlesForThisMed + '本</b>'
+          + '</div>';
+      }
+
+      return '<div class="visit-med-row" style="flex-direction:column;align-items:stretch;gap:6px;padding:12px 14px">'
+        + '<div style="display:flex;align-items:center;gap:8px">'
+        + '<div class="visit-med-name">'
+        + '<div style="font-weight:700">' + m.medicineName + (isInjection ? ' <span style="font-size:10px;background:#e3f2fd;color:#1a6fbf;padding:1px 5px;border-radius:4px">注射</span>' : '') + '</div>'
+        + '<div style="font-size:11px;color:#9aa5b4">'
+        + freq + ' / <b style="color:#555">' + onceAmountStr + '</b> / <b style="color:#555">' + dailyUseStr + '</b> / <b style="color:#555">' + daysPerBottleStr + '</b>'
+        + ' / 在庫: ' + parseFloat(m.currentStock).toFixed(3).replace(/\.?0+$/, '') + '単位'
+        + ' / 1本' + m.capacity + '単位'
+        + (m.expireDays < 999 ? ' / 開封後' + m.expireDays + '日' : '')
         + '</div>'
-        + '<div style="font-size:12px;color:#9aa5b4;margin-top:2px">'
-        + '1回: ' + onceAmountStr + '　1日: ' + dailyUseStr + '　' + daysPerBottleStr
         + '</div>'
-        + (m.currentDepletionDate ? '<div style="font-size:12px;color:#9aa5b4">現在枯渇: ' + m.currentDepletionDate + '　→　処方後: ' + (m.postDepletionDate||'-') + '</div>' : '')
-        + needleStr
+        + '<div class="visit-bottles">' + m.requiredBottles + '<span>本</span></div>'
+        + '</div>'
+        + '<div style="background:#f5f7fa;border-radius:6px;padding:6px 10px;font-size:12px;display:flex;gap:12px;flex-wrap:wrap">'
+        + '<div>📦 現在の在庫: ' + currentDepStr + 'まで</div>'
+        + '<div>✅ 処方後: ' + afterDepStr + 'まで</div>'
+        + '</div>'
+        + needleInfo
+        + warn
         + '</div>';
-    });
-    var needleTotalStr = totalNeedles > 0
-      ? '<div style="font-size:13px;color:#1a6fbf;margin-top:4px">針合計: <b>' + totalNeedles + '本</b>（<b>' + Math.ceil(totalNeedles/14) + 'パック</b>）</div>'
+    }).join('');
+
+    var needlePacks = Math.ceil(totalNeedles / 14);
+    var needleTotal14 = needlePacks * 14;
+    var needleSummary = totalNeedles > 0
+      ? '<div style="background:#ede7f6;border-radius:8px;padding:8px 14px;font-size:13px;margin:4px 0 0 0;display:flex;justify-content:space-between;align-items:center">'
+        + '<span>💉 針の合計（14本単位）</span>'
+        + '<span><b style="font-size:16px;color:#6a1b9a">' + needleTotal14 + '本</b>'
+        + ' <span style="font-size:11px;color:#9aa5b4">（最低' + totalNeedles + '本 → ' + needlePacks + '袋）</span></span>'
+        + '</div>'
       : '';
-    html += '<div style="background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:10px;overflow:hidden">'
-      + '<div style="background:#1a6fbf;color:#fff;padding:10px 14px;cursor:pointer" onclick="closeModal(\'visitPlanDetailModal\');openPatient(\'' + escapeJs(pt.patientId) + '\')">'
-      + '<div style="display:flex;justify-content:space-between;align-items:center">'
-      + '<span style="font-weight:700">' + escapeHtml(pt.patientName) + '</span>'
-      + '<span style="font-size:12px;opacity:0.8">詳細 ›</span>'
+
+    html += '<div class="visit-patient-block">'
+      + '<div class="visit-patient-name" onclick="closeModal(\'visitPlanDetailModal\');openPatient(\'' + escapeJs(pt.patientId) + '\')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">'
+      + '<span>' + escapeHtml(pt.patientName) + '</span>'
+      + '<span style="font-size:12px;opacity:0.7">詳細 ›</span>'
       + '</div>'
-      + needleTotalStr
-      + '</div>'
-      + '<div style="padding:10px 12px">' + drugsHtml + '</div>'
+      + meds
+      + needleSummary
       + '</div>';
   });
+
   el.innerHTML = html;
 }
 
