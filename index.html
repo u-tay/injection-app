@@ -79,6 +79,42 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
 .badge-danger  { background: #ffebee; color: var(--danger); }
 .badge-gray    { background: var(--gray-200); color: var(--gray-400); }
 .badge-blue    { background: #e3f2fd; color: var(--primary); }
+/* 在庫アラートバナー */
+#alertBanner { padding: 0 12px; }
+.alert-section { border-radius: var(--radius); margin: 10px 0 0; overflow: hidden; }
+.alert-section-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; font-size: 14px; font-weight: 700; cursor: pointer;
+  user-select: none;
+}
+.alert-section-header .alert-count {
+  font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 20px;
+}
+.alert-section.danger .alert-section-header { background: #ffebee; color: var(--danger); }
+.alert-section.danger .alert-count { background: var(--danger); color: #fff; }
+.alert-section.warning .alert-section-header { background: #fff3e0; color: var(--warning); }
+.alert-section.warning .alert-count { background: var(--warning); color: #fff; }
+.alert-section.integrity .alert-section-header { background: #fff8e1; color: #7b5800; }
+.alert-section.integrity .alert-count { background: #f9a825; color: #fff; }
+.alert-section-body { display: none; background: var(--white); border: 1.5px solid; border-top: none; border-radius: 0 0 var(--radius) var(--radius); }
+.alert-section.danger  .alert-section-body { border-color: #ffcdd2; }
+.alert-section.warning .alert-section-body { border-color: #ffe0b2; }
+.alert-section.integrity .alert-section-body { border-color: #ffe082; }
+.alert-section-body.open { display: block; }
+.alert-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid var(--gray-200);
+  cursor: pointer;
+}
+.alert-item:last-child { border-bottom: none; }
+.alert-item:active { background: var(--gray-100); }
+.alert-item-main { flex: 1; min-width: 0; }
+.alert-item-name { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alert-item-sub  { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
+.alert-item-days { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.alert-item-days.danger  { color: var(--danger); }
+.alert-item-days.warning { color: var(--warning); }
+.alert-chevron { font-size: 12px; color: var(--gray-400); }
 /* 検索付きセレクト */
 .search-select { position: relative; }
 .search-select-input {
@@ -233,6 +269,7 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
       <h1>注射薬在庫管理</h1>
       <p>患者名・生年月日コード・施設名で検索</p>
     </div>
+    <div id="alertBanner"></div>
     <div class="search-wrap">
       <svg class="search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
       <input type="search" id="searchInput" placeholder="例：山田 / 240701 / ハーモニー" autocomplete="off">
@@ -303,6 +340,22 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
         <span class="step-badge">2</span>「ウェブアプリ」のURLをコピー<br>
         <span class="step-badge">3</span>上の入力欄に貼り付けて保存
       </div>
+    </div>
+
+    <!-- 在庫アラート閾値設定 -->
+    <div class="card" style="margin-top:12px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:12px">🔔 在庫アラート閾値</div>
+      <p style="font-size:13px;color:var(--gray-400);margin-bottom:14px">検索ページ上部に表示する在庫アラートの日数を設定します。</p>
+      <div class="form-group">
+        <label>🔴 危険（残り N 日以内）</label>
+        <input type="number" id="settingsDangerDays" min="1" max="30" value="7" style="max-width:120px">
+      </div>
+      <div class="form-group">
+        <label>🟡 注意（残り N 日以内）</label>
+        <input type="number" id="settingsWarningDays" min="1" max="60" value="14" style="max-width:120px">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="saveAlertThresholds()">保存</button>
+      <span id="alertThresholdSaved" style="font-size:13px;color:var(--success);margin-left:10px;display:none">✓ 保存しました</span>
     </div>
   </div>
 
@@ -801,6 +854,146 @@ function updateUrlDisplay() {
 }
 
 // ============================================================
+// アラート閾値設定（localStorage）
+// ============================================================
+function getAlertThresholds() {
+  return {
+    dangerDays:  parseInt(localStorage.getItem('alertDangerDays')  || '7'),
+    warningDays: parseInt(localStorage.getItem('alertWarningDays') || '14'),
+  };
+}
+
+function saveAlertThresholds() {
+  var d = parseInt(document.getElementById('settingsDangerDays').value)  || 7;
+  var w = parseInt(document.getElementById('settingsWarningDays').value) || 14;
+  if (d >= w) { toast('危険日数は注意日数より小さく設定してください'); return; }
+  localStorage.setItem('alertDangerDays',  d);
+  localStorage.setItem('alertWarningDays', w);
+  var msg = document.getElementById('alertThresholdSaved');
+  if (msg) { msg.style.display = 'inline'; setTimeout(function(){ msg.style.display = 'none'; }, 2000); }
+  // アラートを再取得
+  _alertCache = null;
+  loadAlerts();
+  toast('アラート閾値を保存しました ✓');
+}
+
+function initAlertThresholdInputs() {
+  var t = getAlertThresholds();
+  var d = document.getElementById('settingsDangerDays');
+  var w = document.getElementById('settingsWarningDays');
+  if (d) d.value = t.dangerDays;
+  if (w) w.value = t.warningDays;
+}
+
+// ============================================================
+// 在庫アラート
+// ============================================================
+var _alertCache = null;
+
+async function loadAlerts() {
+  var banner = document.getElementById('alertBanner');
+  if (!banner) return;
+  // キャッシュがあれば再描画のみ
+  if (_alertCache) { renderAlertBanner(_alertCache); return; }
+  try {
+    var t = getAlertThresholds();
+    var result = await api('getAlerts', { dangerDays: t.dangerDays, warningDays: t.warningDays });
+    _alertCache = result;
+    renderAlertBanner(result);
+  } catch(e) {
+    // アラート取得失敗は無視（検索は通常通り使える）
+    console.warn('アラート取得失敗:', e.message);
+  }
+}
+
+function renderAlertBanner(data) {
+  var banner = document.getElementById('alertBanner');
+  if (!banner) return;
+  if (!data || (data.dangerCount === 0 && data.warningCount === 0 && data.integrityCount === 0)) {
+    banner.innerHTML = '';
+    return;
+  }
+
+  var html = '';
+
+  // 🔴 危険アラート
+  var dangers = (data.stockAlerts || []).filter(function(a){ return a.level === 'danger'; });
+  if (dangers.length > 0) {
+    html += '<div class="alert-section danger">';
+    html += '<div class="alert-section-header" onclick="toggleAlertSection(this)">';
+    html += '🔴 在庫危険 <span class="alert-count">' + dangers.length + '件</span>';
+    html += '<span class="alert-chevron">▼</span></div>';
+    html += '<div class="alert-section-body">';
+    dangers.forEach(function(a) {
+      var sub = (a.facilityName || a.hospitalName || '') + (a.facilityName ? '' : '');
+      html += '<div class="alert-item" onclick="showPage(\'patient\');loadPatient(\'' + escapeJs(a.patientId) + '\')">';
+      html += '<div class="alert-item-main">';
+      html += '<div class="alert-item-name">' + escHtml(a.patientName) + ' <span style="font-size:12px;font-weight:400;color:var(--gray-400)">' + escHtml(a.medicineName) + '</span></div>';
+      if (sub) html += '<div class="alert-item-sub">' + escHtml(sub) + '</div>';
+      html += '</div>';
+      html += '<div class="alert-item-days danger">あと ' + a.daysUntilDepletion + '日</div>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  // 🟡 注意アラート
+  var warnings = (data.stockAlerts || []).filter(function(a){ return a.level === 'warning'; });
+  if (warnings.length > 0) {
+    html += '<div class="alert-section warning">';
+    html += '<div class="alert-section-header" onclick="toggleAlertSection(this)">';
+    html += '🟡 在庫注意 <span class="alert-count">' + warnings.length + '件</span>';
+    html += '<span class="alert-chevron">▼</span></div>';
+    html += '<div class="alert-section-body">';
+    warnings.forEach(function(a) {
+      var sub = a.facilityName || a.hospitalName || '';
+      html += '<div class="alert-item" onclick="showPage(\'patient\');loadPatient(\'' + escapeJs(a.patientId) + '\')">';
+      html += '<div class="alert-item-main">';
+      html += '<div class="alert-item-name">' + escHtml(a.patientName) + ' <span style="font-size:12px;font-weight:400;color:var(--gray-400)">' + escHtml(a.medicineName) + '</span></div>';
+      if (sub) html += '<div class="alert-item-sub">' + escHtml(sub) + '</div>';
+      html += '</div>';
+      html += '<div class="alert-item-days warning">あと ' + a.daysUntilDepletion + '日</div>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  // ⚠️ データ整合性
+  var issues = data.integrityIssues || [];
+  if (issues.length > 0) {
+    html += '<div class="alert-section integrity">';
+    html += '<div class="alert-section-header" onclick="toggleAlertSection(this)">';
+    html += '⚠️ データ異常 <span class="alert-count">' + issues.length + '件</span>';
+    html += '<span class="alert-chevron">▼</span></div>';
+    html += '<div class="alert-section-body">';
+    issues.forEach(function(issue) {
+      html += '<div class="alert-item" style="cursor:default">';
+      html += '<div class="alert-item-main">';
+      html += '<div class="alert-item-name" style="color:var(--warning)">' + escHtml(issue.label) + '</div>';
+      html += '<div class="alert-item-sub">' + escHtml(issue.patientName) + ' / ' + escHtml(issue.medicineName) + '</div>';
+      html += '<div class="alert-item-sub">' + escHtml(issue.detail) + '</div>';
+      html += '</div></div>';
+    });
+    html += '</div></div>';
+  }
+
+  banner.innerHTML = html;
+}
+
+function toggleAlertSection(headerEl) {
+  var body = headerEl.nextElementSibling;
+  var chevron = headerEl.querySelector('.alert-chevron');
+  if (!body) return;
+  var isOpen = body.classList.contains('open');
+  body.classList.toggle('open', !isOpen);
+  if (chevron) chevron.textContent = isOpen ? '▼' : '▲';
+}
+
+function escHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ============================================================
 // API呼び出し
 // ============================================================
 async function api(action, params, body) {
@@ -856,10 +1049,10 @@ function showPage(page) {
   document.getElementById('page-' + page).classList.add('active');
   var nb = document.getElementById('nav-' + page);
   if (nb) nb.classList.add('active');
-  if (page === 'search')   { loadAllPatients(); }
+  if (page === 'search')   { loadAllPatients(); loadAlerts(); }
   if (page === 'visit')    { loadHospitals(); setDefaultDates(); }
   if (page === 'bulk')     { loadHospitals().then(function() { initBulkPage(); }); }
-  if (page === 'settings') { updateUrlDisplay(); }
+  if (page === 'settings') { updateUrlDisplay(); initAlertThresholdInputs(); }
   if (page === 'master')   { loadMasterList(currentMasterTab); }
 }
 
@@ -870,8 +1063,10 @@ window.addEventListener('DOMContentLoaded', function() {
     document.getElementById('setupOverlay').classList.add('open');
   } else {
     updateUrlDisplay();
-    // 初期ページが検索ページなら全患者を読み込む
+    initAlertThresholdInputs();
+    // 初期ページが検索ページなら全患者とアラートを読み込む
     loadAllPatients();
+    loadAlerts();
     // QRコードアクセス: ?hospital=...&visitDate=...&nextVisitDate=...
     var params = new URLSearchParams(location.search);
     var qrHospital   = params.get('hospital');
@@ -1435,6 +1630,7 @@ async function submitLog() {
       }
     }
     await api('addLog', null, body);
+    _alertCache = null; // 在庫変更のためアラートを再取得
     toast('✓ ' + action + 'を記録しました');
     closeModal('logModal');
     if (currentPatient) {
@@ -1602,6 +1798,7 @@ async function submitEditLog() {
   if (nv) body.nextVisitDate = nv;
   try {
     await api('updateLog', null, body);
+    _alertCache = null; // 在庫変更のためアラートを再取得
     toast('✓ 記録を変更しました');
     closeModal('editLogModal');
     // 履歴を再読み込みして再表示
@@ -2057,6 +2254,7 @@ async function saveBulkHistEdit(logId, prescriptionId, capacity, date, groupIdx)
     // ログの在庫数を更新（GAS側で処方マスタも同時更新）
     var result = await api('updateLog', null, { logId: logId, stockAfter: stockUnits });
     console.log('updateLog result:', JSON.stringify(result));
+    _alertCache = null; // 在庫変更のためアラートを再取得
     toast('✓ 保存しました');
     // グループを再読み込みして詳細を更新
     await refreshBulkHistoryDetail(groupIdx);
@@ -2147,6 +2345,7 @@ async function submitBulkStock() {
   // 一括登録
   try {
     var result = await api('addBulkLogs', null, { logs: logs, photoUrl: photoUrl });
+    _alertCache = null; // 在庫変更のためアラートを再取得
     var ok = result.results ? result.results.filter(function(r){ return r.success; }).length : 0;
     var ng = result.results ? result.results.filter(function(r){ return !r.success; }).length : 0;
     toast('✓ ' + ok + '件登録完了' + (ng ? ' / ' + ng + '件失敗' : ''));
