@@ -967,12 +967,20 @@ function renderAlertBanner(data) {
     html += '<span class="alert-chevron">▼</span></div>';
     html += '<div class="alert-section-body">';
     issues.forEach(function(issue) {
-      html += '<div class="alert-item" style="cursor:default">';
+      // patientIdがあればタップで患者ページへ遷移
+      var clickAttr = (issue.patientId && issue.patientId !== '不明')
+        ? 'onclick="showPage(\'patient\');loadPatient(\'' + escapeJs(issue.patientId) + '\')" style="cursor:pointer"'
+        : 'style="cursor:default"';
+      html += '<div class="alert-item" ' + clickAttr + '>';
       html += '<div class="alert-item-main">';
       html += '<div class="alert-item-name" style="color:var(--warning)">' + escHtml(issue.label) + '</div>';
       html += '<div class="alert-item-sub">' + escHtml(issue.patientName) + ' / ' + escHtml(issue.medicineName) + '</div>';
       html += '<div class="alert-item-sub">' + escHtml(issue.detail) + '</div>';
-      html += '</div></div>';
+      html += '</div>';
+      if (issue.patientId && issue.patientId !== '不明') {
+        html += '<div style="font-size:16px;color:var(--gray-400)">›</div>';
+      }
+      html += '</div>';
     });
     html += '</div></div>';
   }
@@ -1313,6 +1321,7 @@ function renderRxCard(p, stopped) {
   // 受取ボタン用に在庫・枯渇日も渡す
   var curStock      = escapeJs(String(p.stock !== undefined && p.stock !== null ? p.stock : ''));
   var curDepDate    = escapeJs(String(p.effectiveDepletionDate || ''));
+  var skipCheck     = p.skipIntegrityCheck ? 'true' : 'false';
   var actions = stopped
     ? '<div class="rx-actions">'
       + '<button class="btn btn-outline btn-sm" onclick="showHistory(\'' + pid + '\')">📋 履歴</button>'
@@ -1323,6 +1332,14 @@ function renderRxCard(p, stopped) {
       + '<button class="btn btn-outline btn-sm" onclick="openLogModal(\'' + pid + '\',\'用量変更\',\'' + mname + '\',\'' + cap + '\',\'' + curDailyAmt + '\',\'' + curDailyCount + '\',\'' + curFreq + '\')">変更</button>'
       + '<button class="btn btn-outline btn-sm" onclick="showHistory(\'' + pid + '\')">履歴</button>'
       + '</div>';
+
+  // データ整合性チェック除外トグル
+  var skipToggle = '<div class="rx-skip-check" style="padding:8px 0 0;border-top:1px solid var(--gray-200);margin-top:8px;display:flex;align-items:center;gap:8px">'
+    + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--gray-400);margin:0">'
+    + '<input type="checkbox" id="skip-' + pid + '" ' + (p.skipIntegrityCheck ? 'checked' : '') + ' onchange="toggleSkipIntegrityCheck(\'' + pid + '\',this.checked)" style="width:16px;height:16px;cursor:pointer">'
+    + 'データ整合性チェックを除外'
+    + '</label>'
+    + '</div>';
 
   return '<div class="rx-card" style="' + (stopped ? 'opacity:.6' : '') + '">'
     + '<div class="rx-header">'
@@ -1337,9 +1354,29 @@ function renderRxCard(p, stopped) {
     + '<div class="rx-row"><span class="rx-label">1回使用量</span><span>' + (p.dailyAmount || '-') + ' 単位</span></div>'
     + '<div class="rx-row"><span class="rx-label">枯渇予定日</span><span class="' + depClass2 + '">' + (p.effectiveDepletionDate || '-') + '</span></div>'
     + expireWarn
+    + skipToggle
     + '</div>'
     + actions
     + '</div>';
+}
+
+// ============================================================
+// データ整合性チェック除外フラグのトグル
+// ============================================================
+async function toggleSkipIntegrityCheck(prescriptionId, checked) {
+  try {
+    await api('updatePrescription', null, {
+      prescriptionId: prescriptionId,
+      skipIntegrityCheck: checked,  // GAS側のupdatePrescriptionで受け取る
+    });
+    _alertCache = null; // アラートを再取得
+    toast(checked ? '✓ チェックを除外設定しました' : '✓ チェックを再有効化しました');
+  } catch(e) {
+    toast('⚠️ 保存失敗: ' + e.message);
+    // チェックボックスを元に戻す
+    var cb = document.getElementById('skip-' + prescriptionId);
+    if (cb) cb.checked = !checked;
+  }
 }
 
 // ============================================================
