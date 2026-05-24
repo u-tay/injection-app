@@ -1970,11 +1970,13 @@ function toggleBulkHistEdit(logId) {
 }
 
 async function saveBulkHistEdit(logId, prescriptionId, capacity, date, groupIdx) {
+  console.log('saveBulkHistEdit called: logId=' + logId + ' prescriptionId=' + prescriptionId + ' capacity=' + capacity + ' date=' + date);
   var inp = document.getElementById('bulk-hist-input-' + logId);
-  if (!inp) return;
+  if (!inp) { console.log('input not found for logId=' + logId); return; }
   var bottles = parseFloat(inp.value);
   if (isNaN(bottles) || bottles < 0) { toast('本数を正しく入力してください'); return; }
   var stockUnits = bottles * capacity;
+  console.log('stockUnits=' + stockUnits);
 
   try {
     // ログの在庫数を更新（GAS側で処方マスタも同時更新）
