@@ -572,10 +572,26 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
         <label>変更後1日回数</label>
         <input type="number" id="editLogDailyCount" min="1" step="1" placeholder="例：2">
       </div>
+      <div class="form-group">
+        <label>使用頻度</label>
+        <select id="editLogFrequency">
+          <option value="毎日">毎日</option>
+          <option value="週2回">週2回</option>
+          <option value="週1回">週1回</option>
+          <option value="月1回">月1回</option>
+        </select>
+      </div>
     </div>
     <div class="form-group">
       <label>備考（任意）</label>
       <textarea id="editLogMemo" rows="2" placeholder="メモ"></textarea>
+    </div>
+    <!-- 写真リンク（記録時に添付された写真） -->
+    <div id="editLogPhotoArea" style="display:none;margin-bottom:14px">
+      <a id="editLogPhotoLink" href="#" target="_blank" rel="noopener"
+         style="display:inline-flex;align-items:center;gap:6px;font-size:14px;color:#1a6fbf;background:#e3f2fd;padding:8px 14px;border-radius:8px;text-decoration:none;font-weight:600">
+        📷 添付写真を開く（Googleドライブ）
+      </a>
     </div>
     <button class="btn btn-primary btn-full" onclick="submitEditLog()">変更を保存</button>
   </div>
@@ -903,6 +919,10 @@ function renderRxCard(p, stopped) {
   var cap = escapeJs(String(p.capacity || ''));
   var mname = p.medicineName.replace(/'/g,"");
   var pid = escapeJs(p.prescriptionId);
+  // 用量変更ボタン用に現在の処方値を文字列で渡す
+  var curDailyAmt   = escapeJs(String(p.dailyAmount   || ''));
+  var curDailyCount = escapeJs(String(p.dailyCount    || '1'));
+  var curFreq       = escapeJs(String(p.frequency     || '毎日'));
   var actions = stopped
     ? '<div class="rx-actions">'
       + '<button class="btn btn-outline btn-sm" onclick="showHistory(\'' + pid + '\')">📋 履歴</button>'
@@ -910,7 +930,7 @@ function renderRxCard(p, stopped) {
     : '<div class="rx-actions">'
       + '<button class="btn btn-primary btn-sm" onclick="openLogModal(\'' + pid + '\',\'処方受取\',\'' + mname + '\',\'' + cap + '\')">受取</button>'
       + '<button class="btn btn-outline btn-sm" onclick="openLogModal(\'' + pid + '\',\'残数確認\',\'' + mname + '\',\'' + cap + '\')">残数</button>'
-      + '<button class="btn btn-outline btn-sm" onclick="openLogModal(\'' + pid + '\',\'用量変更\',\'' + mname + '\',\'' + cap + '\')">変更</button>'
+      + '<button class="btn btn-outline btn-sm" onclick="openLogModal(\'' + pid + '\',\'用量変更\',\'' + mname + '\',\'' + cap + '\',\'' + curDailyAmt + '\',\'' + curDailyCount + '\',\'' + curFreq + '\')">変更</button>'
       + '<button class="btn btn-outline btn-sm" onclick="showHistory(\'' + pid + '\')">履歴</button>'
       + '</div>';
 
@@ -935,7 +955,7 @@ function renderRxCard(p, stopped) {
 // ============================================================
 // ログ入力モーダル
 // ============================================================
-function openLogModal(prescriptionId, action, medicineName, capacity) {
+function openLogModal(prescriptionId, action, medicineName, capacity, curDailyAmount, curDailyCount, curFrequency) {
   document.getElementById('logPrescriptionId').value = prescriptionId;
   document.getElementById('logModalTitle').textContent = medicineName;
   document.getElementById('logAction').value = action;
@@ -943,8 +963,6 @@ function openLogModal(prescriptionId, action, medicineName, capacity) {
   document.getElementById('logMemo').value = '';
   document.getElementById('logBottles').value = '';
   document.getElementById('logNewStock').value = '';
-  document.getElementById('logNewDailyAmount').value = '';
-  document.getElementById('logNewDailyCount').value = '';
   // 残数確認用：1本容量をセット
   var cap = parseFloat(capacity) || 0;
   document.getElementById('logCapacity').value = cap;
@@ -953,6 +971,20 @@ function openLogModal(prescriptionId, action, medicineName, capacity) {
     hint.textContent = '1本 = ' + cap + '単位（半端な本は廃棄として切り捨て計算）';
   } else {
     hint.textContent = '';
+  }
+  // 用量変更の場合：現在の処方値を初期値としてセット
+  if (action === '用量変更') {
+    document.getElementById('logNewDailyAmount').value = curDailyAmount || '';
+    document.getElementById('logNewDailyCount').value  = curDailyCount  || '';
+    var freqSel = document.getElementById('logNewFrequency');
+    if (curFrequency && freqSel) {
+      // 一致する選択肢があればセット、なければ最初の選択肢のまま
+      var matched = Array.from(freqSel.options).some(function(opt) { return opt.value === curFrequency; });
+      freqSel.value = matched ? curFrequency : (freqSel.options[0] ? freqSel.options[0].value : '毎日');
+    }
+  } else {
+    document.getElementById('logNewDailyAmount').value = '';
+    document.getElementById('logNewDailyCount').value  = '';
   }
   onLogActionChange();
   resetLogPhoto();
@@ -1158,7 +1190,7 @@ function renderHistory(logs) {
       + (l.needleCount ? '<div style="font-size:13px;color:#9aa5b4">針: ' + l.needleCount + ' 本</div>' : '')
       + (l.depletionDate && l.depletionDate !== '1970/01/01' ? '<div style="font-size:13px;color:#9aa5b4">枯渇予定: ' + l.depletionDate + '</div>' : '')
       + (l.memo ? '<div style="font-size:13px;color:#9aa5b4;margin-top:4px">📝 ' + l.memo + '</div>' : '')
-      + (l.photoUrl ? '<div style="margin-top:6px"><a href="' + l.photoUrl + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;font-size:13px;color:#1a6fbf;background:#e3f2fd;padding:5px 10px;border-radius:6px;text-decoration:none">📷 写真を見る</a></div>' : '')
+      + (l.photoUrl ? '<div style="margin-top:8px"><a href="' + l.photoUrl + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:#1a6fbf;background:#e3f2fd;border:1px solid #90caf9;padding:7px 14px;border-radius:8px;text-decoration:none">📷 添付写真を開く（Googleドライブ）</a></div>' : '')
       + '<div style="display:flex;gap:6px;margin-top:8px">'
       + '<button class="btn btn-outline btn-sm" style="font-size:11px;padding:4px 10px" onclick="openEditLogModal(\'' + lid + '\')">変更</button>'
       + '<button class="btn btn-sm" style="font-size:11px;padding:4px 10px;background:#ffebee;color:#c62828;border:1px solid #ffcdd2" onclick="deleteLog(\'' + lid + '\')">削除</button>'
@@ -1178,7 +1210,14 @@ async function openEditLogModal(logId) {
     document.getElementById('editLogBottles').value = log.bottles || '';
     document.getElementById('editLogStock').value = log.stockAfter !== undefined && log.stockAfter !== null && log.stockAfter !== '' ? log.stockAfter : '';
     document.getElementById('editLogDailyAmount').value = log.newDailyAmount || '';
-    document.getElementById('editLogDailyCount').value = '';
+    document.getElementById('editLogDailyCount').value = log.dailyCount || '';
+    // 使用頻度をセット
+    var freqSel = document.getElementById('editLogFrequency');
+    if (freqSel) {
+      var logFreq = log.frequency || '毎日';
+      var matched = Array.from(freqSel.options).some(function(opt) { return opt.value === logFreq; });
+      freqSel.value = matched ? logFreq : '毎日';
+    }
     var nv = log.nextVisitDate && log.nextVisitDate !== '1970/01/01' ? log.nextVisitDate.replace(/\//g, '-') : '';
     document.getElementById('editLogNextVisit').value = nv;
     // 残数確認用capacity
@@ -1197,6 +1236,15 @@ async function openEditLogModal(logId) {
       var el = document.getElementById('editLogSection-' + a);
       if (el) el.style.display = (a === action) ? '' : 'none';
     });
+    // 写真リンクの表示
+    var photoArea = document.getElementById('editLogPhotoArea');
+    var photoLink = document.getElementById('editLogPhotoLink');
+    if (log.photoUrl && photoArea && photoLink) {
+      photoLink.href = log.photoUrl;
+      photoArea.style.display = '';
+    } else if (photoArea) {
+      photoArea.style.display = 'none';
+    }
     openModal('editLogModal');
   } catch(e) {
     toast('エラー: ' + e.message);
@@ -1234,6 +1282,8 @@ async function submitEditLog() {
   if (d) body.newDailyAmount = parseFloat(d);
   var dc = document.getElementById('editLogDailyCount').value;
   if (dc && !isNaN(dc)) body.newDailyCount = parseInt(dc);
+  var freqSel = document.getElementById('editLogFrequency');
+  if (freqSel && freqSel.value) body.frequency = freqSel.value;
   var nv = document.getElementById('editLogNextVisit').value;
   if (nv) body.nextVisitDate = nv;
   try {
