@@ -1239,6 +1239,16 @@ function renderPatientListGrouped(patients) {
     return;
   }
 
+  // 名前・IDが両方ない患者は表示しない
+  patients = patients.filter(function(p) {
+    return (p.name && p.name.trim()) || (p.patientId && p.patientId.trim()) || (p.searchId && p.searchId.trim());
+  });
+
+  if (!patients.length) {
+    el.innerHTML = '<div class="empty-state">患者データがありません</div>';
+    return;
+  }
+
   // 施設ごとにグループ化
   var facilityGroups = {};
   var facilityOrder  = [];
