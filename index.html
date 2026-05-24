@@ -980,7 +980,8 @@ function renderAlertBanner(data) {
       var clickAttr = (!isOrphan && issue.patientId && issue.patientId !== '不明')
         ? 'onclick="openPatient(\'' + escapeJs(issue.patientId) + '\')" style="cursor:pointer"'
         : 'style="cursor:default"';
-      html += '<div class="alert-item" ' + clickAttr + ' style="' + (isOrphan ? 'cursor:default;' : (issue.patientId && issue.patientId !== '不明' ? 'cursor:pointer;' : 'cursor:default;')) + 'align-items:center">';
+      var itemId = isOrphan ? ' id="orphan-item-' + escapeJs(issue.prescriptionId) + '"' : '';
+      html += '<div class="alert-item"' + itemId + ' ' + clickAttr + ' style="' + (isOrphan ? 'cursor:default;' : (issue.patientId && issue.patientId !== '不明' ? 'cursor:pointer;' : 'cursor:default;')) + 'align-items:center">';
       html += '<div class="alert-item-main">';
       html += '<div class="alert-item-name" style="color:var(--warning)">' + escHtml(issue.label) + '</div>';
       html += '<div class="alert-item-sub">' + escHtml(issue.patientName) + ' / ' + escHtml(issue.medicineName) + '</div>';
@@ -1025,7 +1026,33 @@ function toggleIgnoreOrphan(prescriptionId, checked) {
   }
   localStorage.setItem('ignoredOrphanIds', JSON.stringify(map));
   _alertCache = null;
-  loadAlerts();
+
+  if (checked) {
+    // 該当アイテムをフェードアウトして削除（セクションは閉じない）
+    var itemEl = document.getElementById('orphan-item-' + prescriptionId);
+    if (itemEl) {
+      itemEl.style.transition = 'opacity 0.3s, max-height 0.3s';
+      itemEl.style.overflow = 'hidden';
+      itemEl.style.opacity = '0';
+      itemEl.style.maxHeight = '0';
+      setTimeout(function() {
+        itemEl.remove();
+        // セクション内の残りアイテム数を更新
+        var integritySection = document.querySelector('.alert-section.integrity');
+        if (integritySection) {
+          var remaining = integritySection.querySelectorAll('.alert-item').length;
+          var countEl = integritySection.querySelector('.alert-count');
+          if (countEl) countEl.textContent = remaining + '件';
+          if (remaining === 0) {
+            integritySection.remove();
+          }
+        }
+      }, 300);
+    }
+  } else {
+    // チェックを外した場合は全体を再読み込み
+    loadAlerts();
+  }
 }
 
 function escHtml(str) {
