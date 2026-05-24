@@ -960,25 +960,40 @@ function renderAlertBanner(data) {
 
   // ⚠️ データ整合性
   var issues = data.integrityIssues || [];
-  if (issues.length > 0) {
+  // 無視リストでフィルタ（orphan_log は無視設定可能）
+  var ignoredOrphans = getIgnoredOrphanIds();
+  var visibleIssues = issues.filter(function(issue) {
+    if (issue.type === 'orphan_log') {
+      return !ignoredOrphans[issue.prescriptionId];
+    }
+    return true;
+  });
+  if (visibleIssues.length > 0) {
     html += '<div class="alert-section integrity">';
     html += '<div class="alert-section-header" onclick="toggleAlertSection(this)">';
-    html += '⚠️ データ異常 <span class="alert-count">' + issues.length + '件</span>';
+    html += '⚠️ データ異常 <span class="alert-count">' + visibleIssues.length + '件</span>';
     html += '<span class="alert-chevron">▼</span></div>';
     html += '<div class="alert-section-body">';
-    issues.forEach(function(issue) {
-      // patientIdがあればタップで患者ページへ遷移
-      var clickAttr = (issue.patientId && issue.patientId !== '不明')
+    visibleIssues.forEach(function(issue) {
+      var isOrphan = issue.type === 'orphan_log';
+      // 孤立ログ以外はpatientIdがあれば患者ページへ遷移
+      var clickAttr = (!isOrphan && issue.patientId && issue.patientId !== '不明')
         ? 'onclick="openPatient(\'' + escapeJs(issue.patientId) + '\')" style="cursor:pointer"'
         : 'style="cursor:default"';
-      html += '<div class="alert-item" ' + clickAttr + '>';
+      html += '<div class="alert-item" ' + clickAttr + ' style="' + (isOrphan ? 'cursor:default;' : (issue.patientId && issue.patientId !== '不明' ? 'cursor:pointer;' : 'cursor:default;')) + 'align-items:center">';
       html += '<div class="alert-item-main">';
       html += '<div class="alert-item-name" style="color:var(--warning)">' + escHtml(issue.label) + '</div>';
       html += '<div class="alert-item-sub">' + escHtml(issue.patientName) + ' / ' + escHtml(issue.medicineName) + '</div>';
       html += '<div class="alert-item-sub">' + escHtml(issue.detail) + '</div>';
       html += '</div>';
-      if (issue.patientId && issue.patientId !== '不明') {
+      if (!isOrphan && issue.patientId && issue.patientId !== '不明') {
         html += '<div style="font-size:16px;color:var(--gray-400)">›</div>';
+      }
+      // 孤立ログには「無視」チェックボックスを表示
+      if (isOrphan) {
+        var safeId = escapeJs(issue.prescriptionId);
+        html += '<label onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:4px;cursor:pointer;flex-shrink:0;margin-left:8px;font-size:12px;color:var(--gray-400);white-space:nowrap">'
+          + '<input type="checkbox" onchange="toggleIgnoreOrphan(\'' + safeId + '\',this.checked)" style="width:15px;height:15px;cursor:pointer;flex-shrink:0"> 無視</label>';
       }
       html += '</div>';
     });
@@ -995,6 +1010,22 @@ function toggleAlertSection(headerEl) {
   var isOpen = body.classList.contains('open');
   body.classList.toggle('open', !isOpen);
   if (chevron) chevron.textContent = isOpen ? '▼' : '▲';
+}
+
+function getIgnoredOrphanIds() {
+  try { return JSON.parse(localStorage.getItem('ignoredOrphanIds') || '{}'); } catch(e) { return {}; }
+}
+
+function toggleIgnoreOrphan(prescriptionId, checked) {
+  var map = getIgnoredOrphanIds();
+  if (checked) {
+    map[prescriptionId] = true;
+  } else {
+    delete map[prescriptionId];
+  }
+  localStorage.setItem('ignoredOrphanIds', JSON.stringify(map));
+  _alertCache = null;
+  loadAlerts();
 }
 
 function escHtml(str) {
