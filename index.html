@@ -442,6 +442,10 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
         <input type="number" id="logNewDailyAmount" min="0" step="0.1" placeholder="例：12">
       </div>
       <div class="form-group">
+        <label>新しい1日回数</label>
+        <input type="number" id="logNewDailyCount" min="1" step="1" placeholder="例：2">
+      </div>
+      <div class="form-group">
         <label>使用頻度</label>
         <select id="logNewFrequency">
           <option value="毎日">毎日</option>
@@ -496,6 +500,12 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
           <option value="週1回">週1回</option>
           <option value="月1回">月1回</option>
         </select>
+        <div id="addRxFreqHint" style="font-size:11px;color:#1a6fbf;margin-top:3px"></div>
+      </div>
+      <div class="form-group">
+        <label>1日回数 *</label>
+        <input type="number" id="addRxDailyCount" min="1" step="1" value="1" placeholder="例：2">
+        <div id="addRxDailyCountHint" style="font-size:11px;color:#1a6fbf;margin-top:3px"></div>
       </div>
       <div class="form-group">
         <label>1回使用量（単位） *</label>
@@ -558,6 +568,10 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
       <div class="form-group">
         <label>変更後使用量（単位/回）</label>
         <input type="number" id="editLogDailyAmount" min="0" step="0.1" placeholder="例：21">
+      </div>
+      <div class="form-group">
+        <label>変更後1日回数</label>
+        <input type="number" id="editLogDailyCount" min="1" step="1" placeholder="例：2">
       </div>
     </div>
     <div class="form-group">
@@ -883,13 +897,17 @@ function renderRxCard(p, stopped) {
 
   var cap = escapeJs(String(p.capacity || ''));
   var mname = p.medicineName.replace(/'/g,"");
-  var actions = stopped ? '' :
-    '<div class="rx-actions">'
-    + '<button class="btn btn-primary btn-sm" onclick="openLogModal(\'' + p.prescriptionId + '\',\'処方受取\',\'' + mname + '\',\'' + cap + '\')">受取</button>'
-    + '<button class="btn btn-outline btn-sm" onclick="openLogModal(\'' + p.prescriptionId + '\',\'残数確認\',\'' + mname + '\',\'' + cap + '\')">残数</button>'
-    + '<button class="btn btn-outline btn-sm" onclick="openLogModal(\'' + p.prescriptionId + '\',\'用量変更\',\'' + mname + '\',\'' + cap + '\')">変更</button>'
-    + '<button class="btn btn-outline btn-sm" onclick="showHistory(\'' + p.prescriptionId + '\')">履歴</button>'
-    + '</div>';
+  var pid = escapeJs(p.prescriptionId);
+  var actions = stopped
+    ? '<div class="rx-actions">'
+      + '<button class="btn btn-outline btn-sm" onclick="showHistory(\'' + pid + '\')">📋 履歴</button>'
+      + '</div>'
+    : '<div class="rx-actions">'
+      + '<button class="btn btn-primary btn-sm" onclick="openLogModal(\'' + pid + '\',\'処方受取\',\'' + mname + '\',\'' + cap + '\')">受取</button>'
+      + '<button class="btn btn-outline btn-sm" onclick="openLogModal(\'' + pid + '\',\'残数確認\',\'' + mname + '\',\'' + cap + '\')">残数</button>'
+      + '<button class="btn btn-outline btn-sm" onclick="openLogModal(\'' + pid + '\',\'用量変更\',\'' + mname + '\',\'' + cap + '\')">変更</button>'
+      + '<button class="btn btn-outline btn-sm" onclick="showHistory(\'' + pid + '\')">履歴</button>'
+      + '</div>';
 
   return '<div class="rx-card" style="' + (stopped ? 'opacity:.6' : '') + '">'
     + '<div class="rx-header">'
@@ -900,6 +918,7 @@ function renderRxCard(p, stopped) {
     + '<div class="stock-bar-wrap"><div class="stock-bar-bg"><div class="stock-bar-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div></div>'
     + '<div class="rx-row"><span class="rx-label">現在在庫</span><span>' + stockUnit + ' 単位</span></div>'
     + '<div class="rx-row"><span class="rx-label">使用頻度</span><span>' + (p.frequency || '-') + '</span></div>'
+    + '<div class="rx-row"><span class="rx-label">1日回数</span><span>' + (p.dailyCount || 1) + ' 回/日</span></div>'
     + '<div class="rx-row"><span class="rx-label">1回使用量</span><span>' + (p.dailyAmount || '-') + ' 単位</span></div>'
     + '<div class="rx-row"><span class="rx-label">枯渇予定日</span><span class="' + depClass2 + '">' + (p.effectiveDepletionDate || '-') + '</span></div>'
     + expireWarn
@@ -920,6 +939,7 @@ function openLogModal(prescriptionId, action, medicineName, capacity) {
   document.getElementById('logBottles').value = '';
   document.getElementById('logNewStock').value = '';
   document.getElementById('logNewDailyAmount').value = '';
+  document.getElementById('logNewDailyCount').value = '';
   // 残数確認用：1本容量をセット
   var cap = parseFloat(capacity) || 0;
   document.getElementById('logCapacity').value = cap;
@@ -1043,6 +1063,8 @@ async function submitLog() {
     if (!d || isNaN(d)) { toast('新しい使用量を入力してください'); return; }
     body.newDailyAmount = parseFloat(d);
     body.frequency      = document.getElementById('logNewFrequency').value;
+    var dc = document.getElementById('logNewDailyCount').value;
+    if (dc && !isNaN(dc)) body.newDailyCount = parseInt(dc);
   }
 
   try {
@@ -1118,12 +1140,15 @@ function renderHistory(logs) {
       + (l.bottles ? '<div style="font-size:13px">受取本数: <b>' + l.bottles + '</b> 本</div>' : '')
       + beforeStr
       + afterStr
-      + (l.newDailyAmount ? '<div style="font-size:13px">変更後使用量: <b>' + l.newDailyAmount + '</b> 単位/回</div>' : '')
+      + (l.dailyAmount ? '<div style="font-size:13px">1回使用量: <b>' + l.dailyAmount + '</b> 単位/回</div>' : '')
+      + (l.dailyCount ? '<div style="font-size:13px">1日回数: <b>' + l.dailyCount + '</b> 回/日</div>' : '')
+      + (l.frequency ? '<div style="font-size:13px">使用頻度: <b>' + l.frequency + '</b></div>' : '')
+      + (l.newDailyAmount ? '<div style="font-size:13px;color:#e65100">→ 変更後使用量: <b>' + l.newDailyAmount + '</b> 単位/回</div>' : '')
       + (l.nextVisitDate && l.nextVisitDate !== '1970/01/01' ? '<div style="font-size:13px;color:#9aa5b4">次回処方予定: ' + l.nextVisitDate + '</div>' : '')
       + (l.needleCount ? '<div style="font-size:13px;color:#9aa5b4">針: ' + l.needleCount + ' 本</div>' : '')
       + (l.depletionDate && l.depletionDate !== '1970/01/01' ? '<div style="font-size:13px;color:#9aa5b4">枯渇予定: ' + l.depletionDate + '</div>' : '')
       + (l.memo ? '<div style="font-size:13px;color:#9aa5b4;margin-top:4px">📝 ' + l.memo + '</div>' : '')
-      + (l.photoUrl ? '<div style="margin-top:6px"><a href="' + l.photoUrl + '" target="_blank" rel="noopener"><img src="' + l.photoUrl + '" alt="写真" style="max-width:100%;max-height:120px;border-radius:6px;border:1px solid #e8ecf0;object-fit:cover" onerror="this.parentElement.innerHTML=\'<span style=&quot;font-size:12px;color:#9aa5b4&quot;>📷 写真（<a href=&quot;' + l.photoUrl + '&quot; target=&quot;_blank&quot;>開く</a>）</span>\'"></a></div>' : '')
+      + (l.photoUrl ? '<div style="margin-top:6px"><a href="' + l.photoUrl + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;font-size:13px;color:#1a6fbf;background:#e3f2fd;padding:5px 10px;border-radius:6px;text-decoration:none">📷 写真を見る</a></div>' : '')
       + '<div style="display:flex;gap:6px;margin-top:8px">'
       + '<button class="btn btn-outline btn-sm" style="font-size:11px;padding:4px 10px" onclick="openEditLogModal(\'' + lid + '\')">変更</button>'
       + '<button class="btn btn-sm" style="font-size:11px;padding:4px 10px;background:#ffebee;color:#c62828;border:1px solid #ffcdd2" onclick="deleteLog(\'' + lid + '\')">削除</button>'
@@ -1143,6 +1168,7 @@ async function openEditLogModal(logId) {
     document.getElementById('editLogBottles').value = log.bottles || '';
     document.getElementById('editLogStock').value = log.stockAfter !== undefined && log.stockAfter !== null && log.stockAfter !== '' ? log.stockAfter : '';
     document.getElementById('editLogDailyAmount').value = log.newDailyAmount || '';
+    document.getElementById('editLogDailyCount').value = '';
     var nv = log.nextVisitDate && log.nextVisitDate !== '1970/01/01' ? log.nextVisitDate.replace(/\//g, '-') : '';
     document.getElementById('editLogNextVisit').value = nv;
     // 残数確認用capacity
@@ -1196,6 +1222,8 @@ async function submitEditLog() {
   }
   var d = document.getElementById('editLogDailyAmount').value;
   if (d) body.newDailyAmount = parseFloat(d);
+  var dc = document.getElementById('editLogDailyCount').value;
+  if (dc && !isNaN(dc)) body.newDailyCount = parseInt(dc);
   var nv = document.getElementById('editLogNextVisit').value;
   if (nv) body.nextVisitDate = nv;
   try {
@@ -1240,6 +1268,8 @@ async function deleteLog(logId) {
 // ============================================================
 // 処方追加モーダル
 // ============================================================
+var addRxMedicineList = []; // 薬品マスタキャッシュ（処方追加用）
+
 async function openAddPrescriptionModal() {
   if (!currentPatient) return;
   document.getElementById('addRxPatientName').textContent = currentPatient.name;
@@ -1247,32 +1277,58 @@ async function openAddPrescriptionModal() {
   document.getElementById('addRxStock').value = '';
   document.getElementById('addRxAmount').value = '';
   document.getElementById('addRxFreq').value = '毎日';
+  document.getElementById('addRxFreqHint').textContent = '';
+  document.getElementById('addRxDailyCount').value = '1';
+  document.getElementById('addRxDailyCountHint').textContent = '';
   document.getElementById('addRxMemo').value = '';
   // 薬品リストを読み込んで検索セレクトを生成
   document.getElementById('addRxMedicine').innerHTML = '<div style="color:#9aa5b4;font-size:13px;padding:8px">読み込み中...</div>';
   try {
     var medicines = masterCache['medicine'] || await loadMasterForSelect('medicine');
+    addRxMedicineList = medicines;
     var medOptions = medicines.map(function(m) {
       return {
         value: m['薬品ID'],
         label: m['薬品名'] + (m['種類'] ? '（' + m['種類'] + '）' : '')
       };
     });
-    createSearchSelect('addRxMedicine', medOptions, '', '薬品名で検索...');
+    createSearchSelect('addRxMedicine', medOptions, '', '薬品名で検索...', onAddRxMedicineChange);
   } catch(e) {
     document.getElementById('addRxMedicine').innerHTML = '<div style="color:red;font-size:13px">読み込み失敗</div>';
   }
   openModal('addRxModal');
 }
 
+// 薬品選択時に薬品マスタの固定値を自動反映
+function onAddRxMedicineChange(medicineId) {
+  if (!medicineId || !addRxMedicineList.length) return;
+  var med = addRxMedicineList.find(function(m) { return m['薬品ID'] === medicineId; });
+  if (!med) return;
+  // 使用頻度の自動反映
+  if (med['使用頻度']) {
+    document.getElementById('addRxFreq').value = med['使用頻度'];
+    document.getElementById('addRxFreqHint').textContent = '※ 薬品マスタより自動反映';
+  } else {
+    document.getElementById('addRxFreqHint').textContent = '';
+  }
+  // 1日回数の自動反映
+  if (med['1日回数']) {
+    document.getElementById('addRxDailyCount').value = med['1日回数'];
+    document.getElementById('addRxDailyCountHint').textContent = '※ 薬品マスタより自動反映';
+  } else {
+    document.getElementById('addRxDailyCountHint').textContent = '';
+  }
+}
+
 async function submitAddPrescription() {
   if (!currentPatient) return;
-  var medicineId = getSearchSelectValue('addRxMedicine');
-  var freq       = document.getElementById('addRxFreq').value;
-  var amount     = document.getElementById('addRxAmount').value;
-  var stock      = document.getElementById('addRxStock').value;
-  var date       = document.getElementById('addRxDate').value;
-  var memo       = document.getElementById('addRxMemo').value;
+  var medicineId  = getSearchSelectValue('addRxMedicine');
+  var freq        = document.getElementById('addRxFreq').value;
+  var dailyCount  = document.getElementById('addRxDailyCount').value;
+  var amount      = document.getElementById('addRxAmount').value;
+  var stock       = document.getElementById('addRxStock').value;
+  var date        = document.getElementById('addRxDate').value;
+  var memo        = document.getElementById('addRxMemo').value;
   if (!medicineId) { toast('薬品を選択してください'); return; }
   if (!amount || isNaN(amount)) { toast('1回使用量を入力してください'); return; }
   try {
@@ -1281,6 +1337,7 @@ async function submitAddPrescription() {
       hospitalId:  currentPatient.hospitalId,
       medicineId:  medicineId,
       frequency:   freq,
+      dailyCount:  parseInt(dailyCount) || 1,
       dailyAmount: parseFloat(amount),
       stock:       stock ? parseFloat(stock) : 0,
       startDate:   date,
@@ -2035,6 +2092,7 @@ var MASTER_DEF = {
       { key: '1本容量',        label: '1本容量（単位）', type: 'number', required: false },
       { key: '開封後有効日数', label: '開封後有効日数（期限なしは999）', type: 'number', required: false },
       { key: '使用頻度',       label: '使用頻度（固定の場合）', type: 'select', required: false, options: ['', '毎日', '週2回', '週1回', '月1回'] },
+      { key: '1日回数',        label: '1日回数（固定の場合）', type: 'number', required: false },
     ],
     rowLabel: function(r) { return r['薬品名'] + '　' + (r['種類'] || '') + '  1本' + (r['1本容量'] || '-') + '単位 / 開封後' + (r['開封後有効日数'] >= 999 ? '期限なし' : (r['開封後有効日数'] || '-') + '日'); },
   },
@@ -2165,7 +2223,7 @@ function escapeJs(s)   { return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\
 // ============================================================
 // options: [{value, label}]
 // onChange: function(value, label)
-function createSearchSelect(containerId, options, currentValue, placeholder) {
+function createSearchSelect(containerId, options, currentValue, placeholder, onChange) {
   var container = document.getElementById(containerId);
   if (!container) return;
   placeholder = placeholder || '選択または入力して検索...';
@@ -2224,6 +2282,7 @@ function createSearchSelect(containerId, options, currentValue, placeholder) {
     inp.value    = label;
     clrBtn.style.display = value ? '' : 'none';
     closeDropdown();
+    if (onChange && value) onChange(value, label);
   }
 
   // イベント
