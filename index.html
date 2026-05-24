@@ -856,6 +856,7 @@ function showPage(page) {
   document.getElementById('page-' + page).classList.add('active');
   var nb = document.getElementById('nav-' + page);
   if (nb) nb.classList.add('active');
+  if (page === 'search')   { loadAllPatients(); }
   if (page === 'visit')    { loadHospitals(); setDefaultDates(); }
   if (page === 'bulk')     { loadHospitals().then(function() { initBulkPage(); }); }
   if (page === 'settings') { updateUrlDisplay(); }
@@ -869,6 +870,8 @@ window.addEventListener('DOMContentLoaded', function() {
     document.getElementById('setupOverlay').classList.add('open');
   } else {
     updateUrlDisplay();
+    // 初期ページが検索ページなら全患者を読み込む
+    loadAllPatients();
     // QRコードアクセス: ?hospital=...&visitDate=...&nextVisitDate=...
     var params = new URLSearchParams(location.search);
     var qrHospital   = params.get('hospital');
@@ -928,12 +931,34 @@ function pad(n) { return String(n).padStart(2, '0'); }
 // 患者検索
 // ============================================================
 var searchTimer = null;
+var _allPatients = []; // 全患者キャッシュ
+
 document.getElementById('searchInput').addEventListener('input', function() {
   clearTimeout(searchTimer);
   var q = this.value.trim();
-  if (q.length < 1) { document.getElementById('searchResults').innerHTML = ''; return; }
+  if (q.length < 1) {
+    // 検索欄が空になったら全患者一覧に戻す
+    renderPatientListGrouped(_allPatients);
+    return;
+  }
   searchTimer = setTimeout(function() { doSearch(q); }, 400);
 });
+
+// 検索ページを開いたとき全患者一覧を読み込む
+async function loadAllPatients() {
+  if (_allPatients.length > 0) {
+    renderPatientListGrouped(_allPatients);
+    return;
+  }
+  loading('searchResults');
+  try {
+    var patients = await api('getAllPatients');
+    _allPatients = patients || [];
+    renderPatientListGrouped(_allPatients);
+  } catch(e) {
+    document.getElementById('searchResults').innerHTML = '<div class="card" style="color:red">エラー: ' + e.message + '</div>';
+  }
+}
 
 async function doSearch(q) {
   loading('searchResults');
@@ -945,6 +970,55 @@ async function doSearch(q) {
   }
 }
 
+// 施設グループ分け・50音順で全患者一覧を表示
+function renderPatientListGrouped(patients) {
+  var el = document.getElementById('searchResults');
+  if (!patients || !patients.length) {
+    el.innerHTML = '<div class="empty-state">患者データがありません</div>';
+    return;
+  }
+
+  // 施設ごとにグループ化
+  var facilityGroups = {};
+  var facilityOrder  = [];
+  patients.forEach(function(p) {
+    var key = p.facilityName || p.hospitalName || '（施設未設定）';
+    if (!facilityGroups[key]) {
+      facilityGroups[key] = [];
+      facilityOrder.push(key);
+    }
+    facilityGroups[key].push(p);
+  });
+
+  // 施設名を50音順にソート
+  facilityOrder.sort(function(a, b) { return a.localeCompare(b, 'ja'); });
+
+  var html = '';
+  facilityOrder.forEach(function(facName) {
+    var group = facilityGroups[facName];
+    // 患者を50音順にソート
+    group.sort(function(a, b) { return (a.name || '').localeCompare(b.name || '', 'ja'); });
+
+    html += '<div style="padding:10px 16px 4px;font-size:12px;font-weight:700;color:var(--gray-400);'
+      + 'background:var(--gray-100);border-bottom:1px solid var(--gray-200);position:sticky;top:0;z-index:10">'
+      + '🏥 ' + escapeHtml(facName) + ' <span style="font-weight:400">（' + group.length + '名）</span>'
+      + '</div>';
+
+    html += group.map(function(p) {
+      return '<div class="patient-card" onclick="openPatient(\'' + escapeJs(p.patientId) + '\')">'
+        + '<div class="patient-avatar">' + (p.name ? p.name.charAt(0) : '?') + '</div>'
+        + '<div class="patient-info">'
+        + '<div class="patient-name">' + escapeHtml(p.name) + '</div>'
+        + '<div class="patient-sub">' + escapeHtml(p.hospitalName || '') + '　' + (p.searchId || '') + '</div>'
+        + '</div>'
+        + '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9aa5b4" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>'
+        + '</div>';
+    }).join('');
+  });
+
+  el.innerHTML = html;
+}
+
 function renderSearchResults(patients) {
   var el = document.getElementById('searchResults');
   if (!patients || !patients.length) {
@@ -952,11 +1026,11 @@ function renderSearchResults(patients) {
     return;
   }
   el.innerHTML = patients.map(function(p) {
-    return '<div class="patient-card" onclick="openPatient(\'' + p.patientId + '\')">'
+    return '<div class="patient-card" onclick="openPatient(\'' + escapeJs(p.patientId) + '\')">'
       + '<div class="patient-avatar">' + (p.name ? p.name.charAt(0) : '?') + '</div>'
       + '<div class="patient-info">'
-      + '<div class="patient-name">' + p.name + '</div>'
-      + '<div class="patient-sub">' + (p.facilityName || p.hospitalName || '') + '　' + (p.searchId || '') + '</div>'
+      + '<div class="patient-name">' + escapeHtml(p.name) + '</div>'
+      + '<div class="patient-sub">' + escapeHtml(p.facilityName || p.hospitalName || '') + '　' + (p.searchId || '') + '</div>'
       + '</div>'
       + '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9aa5b4" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>'
       + '</div>';
@@ -3163,6 +3237,8 @@ async function loadMasterForSelect(type) {
 }
 
 async function saveMaster() {
+  // 患者マスタを変更した場合は全患者キャッシュをクリア
+  if (currentMasterTab === 'patient') _allPatients = [];
   var def    = MASTER_DEF[currentMasterTab];
   var idKey  = getMasterIdKey(currentMasterTab);
   var record = {};
