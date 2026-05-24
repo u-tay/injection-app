@@ -522,28 +522,38 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
 
 <!-- ログ変更モーダル -->
 <div class="modal-overlay" id="editLogModal">
-  <div class="modal">
+  <div class="modal" style="max-height:90vh;overflow-y:auto">
     <div class="modal-title">
       <span>記録変更 - <span id="editLogActionLabel"></span></span>
       <button onclick="closeModal('editLogModal')">&#215;</button>
     </div>
     <input type="hidden" id="editLogId">
+    <input type="hidden" id="editLogCapacity" value="">
     <div class="form-group">
       <label>実施日</label>
       <input type="date" id="editLogDate">
     </div>
+    <!-- 処方受取セクション -->
     <div id="editLogSection-処方受取">
       <div class="form-group">
         <label>受取本数</label>
         <input type="number" id="editLogBottles" min="0" step="1" placeholder="例：2">
       </div>
-    </div>
-    <div id="editLogSection-残数確認" style="display:none">
       <div class="form-group">
-        <label>確定在庫（単位）</label>
-        <input type="number" id="editLogStock" min="0" step="0.1" placeholder="例：600">
+        <label>次回処方予定日（任意）</label>
+        <input type="date" id="editLogNextVisit">
       </div>
     </div>
+    <!-- 残数確認セクション -->
+    <div id="editLogSection-残数確認" style="display:none">
+      <div class="form-group">
+        <label>残本数</label>
+        <input type="number" id="editLogStock" min="0" step="1" placeholder="例：2" oninput="onEditStockBottlesInput()">
+        <div id="editLogStockHint" style="font-size:12px;color:#9aa5b4;margin-top:4px"></div>
+        <div id="editLogStockCalc" style="font-size:12px;color:#1a6fbf;margin-top:2px"></div>
+      </div>
+    </div>
+    <!-- 用量変更セクション -->
     <div id="editLogSection-用量変更" style="display:none">
       <div class="form-group">
         <label>変更後使用量（単位/回）</label>
@@ -551,7 +561,7 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
       </div>
     </div>
     <div class="form-group">
-      <label>備考</label>
+      <label>備考（任意）</label>
       <textarea id="editLogMemo" rows="2" placeholder="メモ"></textarea>
     </div>
     <button class="btn btn-primary btn-full" onclick="submitEditLog()">変更を保存</button>
@@ -1090,18 +1100,31 @@ function renderHistory(logs) {
   document.getElementById('historyContent').innerHTML = logs.map(function(l) {
     var color = colors[l.action] || '#3d4d5c';
     var lid = escapeJs(l.logId || '');
-    return '<div style="padding:10px 0;border-bottom:1px solid #e8ecf0;">'
-      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
-      + '<span style="font-weight:700;color:' + color + '">' + l.action + '</span>'
+    // 受取前在庫（本数換算）
+    var beforeStr = '';
+    if (l.beforeStock !== '' && l.beforeStock !== undefined && l.beforeStock !== null) {
+      beforeStr = '<div style="font-size:13px;color:#9aa5b4">受取前在庫: ' + parseFloat(l.beforeStock).toFixed(1) + ' 単位</div>';
+    }
+    // 確定在庫
+    var afterStr = '';
+    if (l.stockAfter !== '' && l.stockAfter !== undefined && l.stockAfter !== null) {
+      afterStr = '<div style="font-size:13px">確定在庫: <b>' + parseFloat(l.stockAfter).toFixed(1) + '</b> 単位</div>';
+    }
+    return '<div style="padding:12px 0;border-bottom:1px solid #e8ecf0;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+      + '<span style="font-weight:700;font-size:14px;color:' + color + '">' + l.action + '</span>'
       + '<span style="font-size:13px;color:#9aa5b4">' + (l.date || '') + '</span>'
       + '</div>'
-      + (l.bottles ? '<div style="font-size:13px">受取本数: <b>' + l.bottles + '</b>本</div>' : '')
-      + (l.stockAfter !== '' && l.stockAfter !== undefined && l.stockAfter !== null ? '<div style="font-size:13px">確定在庫: <b>' + parseFloat(l.stockAfter).toFixed(1) + '</b>単位</div>' : '')
-      + (l.newDailyAmount ? '<div style="font-size:13px">変更後使用量: <b>' + l.newDailyAmount + '</b>単位/回</div>' : '')
-      + (l.depletionDate ? '<div style="font-size:13px;color:#9aa5b4">枯渇予定: ' + l.depletionDate + '</div>' : '')
-      + (l.memo ? '<div style="font-size:13px;color:#9aa5b4;margin-top:2px">' + l.memo + '</div>' : '')
+      + (l.bottles ? '<div style="font-size:13px">受取本数: <b>' + l.bottles + '</b> 本</div>' : '')
+      + beforeStr
+      + afterStr
+      + (l.newDailyAmount ? '<div style="font-size:13px">変更後使用量: <b>' + l.newDailyAmount + '</b> 単位/回</div>' : '')
+      + (l.nextVisitDate && l.nextVisitDate !== '1970/01/01' ? '<div style="font-size:13px;color:#9aa5b4">次回処方予定: ' + l.nextVisitDate + '</div>' : '')
+      + (l.needleCount ? '<div style="font-size:13px;color:#9aa5b4">針: ' + l.needleCount + ' 本</div>' : '')
+      + (l.depletionDate && l.depletionDate !== '1970/01/01' ? '<div style="font-size:13px;color:#9aa5b4">枯渇予定: ' + l.depletionDate + '</div>' : '')
+      + (l.memo ? '<div style="font-size:13px;color:#9aa5b4;margin-top:4px">📝 ' + l.memo + '</div>' : '')
       + (l.photoUrl ? '<div style="margin-top:6px"><a href="' + l.photoUrl + '" target="_blank" rel="noopener"><img src="' + l.photoUrl + '" alt="写真" style="max-width:100%;max-height:120px;border-radius:6px;border:1px solid #e8ecf0;object-fit:cover" onerror="this.parentElement.innerHTML=\'<span style=&quot;font-size:12px;color:#9aa5b4&quot;>📷 写真（<a href=&quot;' + l.photoUrl + '&quot; target=&quot;_blank&quot;>開く</a>）</span>\'"></a></div>' : '')
-      + '<div style="display:flex;gap:6px;margin-top:6px">'
+      + '<div style="display:flex;gap:6px;margin-top:8px">'
       + '<button class="btn btn-outline btn-sm" style="font-size:11px;padding:4px 10px" onclick="openEditLogModal(\'' + lid + '\')">変更</button>'
       + '<button class="btn btn-sm" style="font-size:11px;padding:4px 10px;background:#ffebee;color:#c62828;border:1px solid #ffcdd2" onclick="deleteLog(\'' + lid + '\')">削除</button>'
       + '</div>'
@@ -1110,7 +1133,8 @@ function renderHistory(logs) {
 }
 
 async function openEditLogModal(logId) {
-  // まずGASからそのログの詳細を取得
+  // 履歴モーダルを先に閉じる
+  closeModal('historyModal');
   try {
     var log = await api('getLog', { logId: logId });
     document.getElementById('editLogId').value = logId;
@@ -1119,6 +1143,17 @@ async function openEditLogModal(logId) {
     document.getElementById('editLogBottles').value = log.bottles || '';
     document.getElementById('editLogStock').value = log.stockAfter !== undefined && log.stockAfter !== null && log.stockAfter !== '' ? log.stockAfter : '';
     document.getElementById('editLogDailyAmount').value = log.newDailyAmount || '';
+    var nv = log.nextVisitDate && log.nextVisitDate !== '1970/01/01' ? log.nextVisitDate.replace(/\//g, '-') : '';
+    document.getElementById('editLogNextVisit').value = nv;
+    // 残数確認用capacity
+    var cap = parseFloat(log.capacity || 0);
+    document.getElementById('editLogCapacity').value = cap;
+    var hint = document.getElementById('editLogStockHint');
+    if (cap > 0) {
+      hint.textContent = '1本 = ' + cap + '単位（本数×容量で計算）';
+    } else {
+      hint.textContent = '';
+    }
     // アクション別セクション表示
     var action = log.action || '';
     document.getElementById('editLogActionLabel').textContent = action;
@@ -1132,25 +1167,46 @@ async function openEditLogModal(logId) {
   }
 }
 
+function onEditStockBottlesInput() {
+  var val = parseInt(document.getElementById('editLogStock').value) || 0;
+  var cap = parseFloat(document.getElementById('editLogCapacity').value) || 0;
+  var calc = document.getElementById('editLogStockCalc');
+  if (val >= 0 && cap > 0) {
+    calc.textContent = '→ ' + val + '本 × ' + cap + '単位 = ' + (val * cap) + '単位として記録';
+  } else {
+    calc.textContent = '';
+  }
+}
+
 async function submitEditLog() {
   var logId = document.getElementById('editLogId').value;
   var date  = document.getElementById('editLogDate').value;
   var memo  = document.getElementById('editLogMemo').value;
-  var body  = { logId: logId, date: date, memo: memo };
+  var action = document.getElementById('editLogActionLabel').textContent;
+  var body  = { logId: logId, date: date, memo: memo, action: action };
   var b = document.getElementById('editLogBottles').value;
   if (b) body.bottles = parseFloat(b);
+  // 残数確認：本数×容量で単位換算
   var s = document.getElementById('editLogStock').value;
-  if (s !== '') body.stockAfter = parseFloat(s);
+  if (s !== '') {
+    var cap = parseFloat(document.getElementById('editLogCapacity').value) || 0;
+    var bottles = parseInt(s);
+    body.stockAfter = cap > 0 ? bottles * cap : bottles;
+    body.stockBottles = bottles;
+  }
   var d = document.getElementById('editLogDailyAmount').value;
   if (d) body.newDailyAmount = parseFloat(d);
+  var nv = document.getElementById('editLogNextVisit').value;
+  if (nv) body.nextVisitDate = nv;
   try {
     await api('updateLog', null, body);
     toast('✓ 記録を変更しました');
     closeModal('editLogModal');
-    // 履歴を再読み込み
+    // 履歴を再読み込みして再表示
     if (currentHistoryPrescriptionId) {
       var logs = await api('getLogs', { prescriptionId: currentHistoryPrescriptionId });
       renderHistory(logs);
+      openModal('historyModal');
     }
     // 患者詳細も更新
     if (currentPatient) {
