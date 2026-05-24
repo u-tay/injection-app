@@ -1921,8 +1921,10 @@ function renderBulkHistoryDetail(g, groupIdx) {
       + '👤 ' + escapeHtml(pt.name) + '</div>';
 
     pt.logs.forEach(function(l) {
-      var lid = escapeJs(l.logId);
-      var cap = l.capacity || 1;
+      var lid    = escapeJs(l.logId);
+      var prid   = escapeJs(l.prescriptionId);
+      var ldate  = escapeJs(l.date || '');
+      var cap    = l.capacity || 1;
       var stockBottles = cap > 0 ? (l.stockAfter / cap).toFixed(1) : '-';
       html += '<div id="bulk-hist-row-' + lid + '" style="background:#f5f7fa;border-radius:8px;padding:10px 12px;margin-bottom:8px">'
         // 薬品名 + 在庫
@@ -1934,7 +1936,7 @@ function renderBulkHistoryDetail(g, groupIdx) {
         + '</div>'
         // 編集エリア（折り畳み）
         + '<button class="btn btn-outline btn-sm" style="font-size:11px;padding:3px 9px;flex-shrink:0"'
-        + ' onclick="toggleBulkHistEdit(\'' + lid + '\',' + cap + ',' + l.stockAfter + ',' + groupIdx + ')">✏️ 修正</button>'
+        + ' onclick="toggleBulkHistEdit(\'' + lid + '\')">✏️ 修正</button>'
         + '</div>'
         // 編集フォーム（初期非表示）
         + '<div id="bulk-hist-edit-' + lid + '" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid #e8ecf0">'
@@ -1945,9 +1947,9 @@ function renderBulkHistoryDetail(g, groupIdx) {
         + '<span style="font-size:13px">本</span>'
         + '</div>'
         + '<div style="display:flex;gap:6px">'
-        + '<button class="btn btn-primary btn-sm" onclick="saveBulkHistEdit(\'' + lid + '\',' + cap + ',' + groupIdx + ')">保存</button>'
+        + '<button class="btn btn-primary btn-sm" onclick="saveBulkHistEdit(\'' + lid + '\',\'' + prid + '\',' + cap + ',\'' + ldate + '\',' + groupIdx + ')">保存</button>'
         + '<button class="btn btn-sm" style="background:#ffebee;color:#c62828;border:1px solid #ffcdd2" onclick="deleteBulkHistLog(\'' + lid + '\',' + groupIdx + ')">削除</button>'
-        + '<button class="btn btn-outline btn-sm" onclick="toggleBulkHistEdit(\'' + lid + '\',0,0,0)">キャンセル</button>'
+        + '<button class="btn btn-outline btn-sm" onclick="toggleBulkHistEdit(\'' + lid + '\')">キャンセル</button>'
         + '</div>'
         + '</div>'
         + '</div>';
@@ -1960,14 +1962,14 @@ function renderBulkHistoryDetail(g, groupIdx) {
   document.getElementById('bulkHistoryDetailContent').innerHTML = html;
 }
 
-function toggleBulkHistEdit(logId, capacity, currentStockAfter, groupIdx) {
+function toggleBulkHistEdit(logId) {
   var editEl = document.getElementById('bulk-hist-edit-' + logId);
   if (!editEl) return;
   var isOpen = editEl.style.display !== 'none';
   editEl.style.display = isOpen ? 'none' : '';
 }
 
-async function saveBulkHistEdit(logId, capacity, groupIdx) {
+async function saveBulkHistEdit(logId, prescriptionId, capacity, date, groupIdx) {
   var inp = document.getElementById('bulk-hist-input-' + logId);
   if (!inp) return;
   var bottles = parseFloat(inp.value);
@@ -1975,7 +1977,9 @@ async function saveBulkHistEdit(logId, capacity, groupIdx) {
   var stockUnits = bottles * capacity;
 
   try {
-    await api('updateLog', null, { logId: logId, stockAfter: stockUnits });
+    // ログの在庫数を更新（GAS側で処方マスタも同時更新）
+    var result = await api('updateLog', null, { logId: logId, stockAfter: stockUnits });
+    console.log('updateLog result:', JSON.stringify(result));
     toast('✓ 保存しました');
     // グループを再読み込みして詳細を更新
     await refreshBulkHistoryDetail(groupIdx);
