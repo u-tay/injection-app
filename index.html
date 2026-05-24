@@ -717,12 +717,32 @@ async function api(action, params, body) {
   url.searchParams.set('action', action);
   Object.keys(params).forEach(function(k) { url.searchParams.set(k, params[k]); });
 
-  // GASのCORS制約のため、POSTデータもGETパラメータとして送る
-  if (body) {
-    url.searchParams.set('payload', JSON.stringify(body));
+  // 写真アップロードなど大きなデータはPOSTで送る
+  // GASはno-corsのためPOSTのレスポンスが読めないので、
+  // フォームエンコードでPOSTしてリダイレクト先のGETでレスポンスを受け取る方式は使えない。
+  // → 代わりに、base64データをチャンクに分けずURLパラメータが8KB以上になる場合はエラーを出す。
+  // 実装: payloadが大きい場合はno-redirect POSTを試みる。
+  // GAS Web App は doPost でも動くが、CORSのためfetchのレスポンスが読めない場合がある。
+  // 解決策: GASにdoPostを追加し、no-corsなしでPOSTできるようにする。
+  // ここでは body が base64 を含む場合は POST（application/x-www-form-urlencoded）を使う。
+  var bodyStr = body ? JSON.stringify(body) : null;
+  var usePOST = bodyStr && bodyStr.length > 4000; // 4KB超はPOST
+
+  let res;
+  if (usePOST) {
+    // POSTで送信（GASのdoPostで受け取る）
+    var formBody = 'action=' + encodeURIComponent(action) + '&payload=' + encodeURIComponent(bodyStr);
+    res = await fetch(url.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formBody,
+    });
+  } else {
+    // 通常のGETパラメータ方式
+    if (bodyStr) url.searchParams.set('payload', bodyStr);
+    res = await fetch(url.toString(), { method: 'GET' });
   }
 
-  const res = await fetch(url.toString(), { method: 'GET' });
   const data = await res.json();
   if (data && data.error) throw new Error(data.error);
   return data;
