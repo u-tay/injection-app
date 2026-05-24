@@ -320,9 +320,8 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
       <div class="card">
         <div class="form-group">
           <label>病院・クリニック</label>
-          <select id="visitHospital">
-            <option value="">選択してください</option>
-          </select>
+          <div id="visitHospitalSearchSelect"></div>
+          <input type="hidden" id="visitHospital">
         </div>
         <div class="form-group">
           <label>今回往診日</label>
@@ -746,11 +745,17 @@ window.addEventListener('DOMContentLoaded', function() {
       showPage('visit');
       loadHospitals().then(function() {
         switchVisitTab('calc');
-        var sel = document.getElementById('visitHospital');
-        // 選択肢にhospitalIdをセット
-        Array.from(sel.options).forEach(function(opt) {
-          if (opt.value === qrHospital) opt.selected = true;
-        });
+        // 検索付きセレクトにhospitalIdをセット
+        var hosp = hospitals.find(function(h) { return h.hospitalId === qrHospital; });
+        if (hosp) {
+          var label = hosp.hospitalName + '（' + hosp.facilityName + '）';
+          createSearchSelect('visitHospitalSearchSelect', hospitals.map(function(h) {
+            return { value: h.hospitalId, label: h.hospitalName + '（' + h.facilityName + '）' };
+          }), qrHospital, '病院・クリニックを検索...', function(value) {
+            document.getElementById('visitHospital').value = value;
+          });
+          document.getElementById('visitHospital').value = qrHospital;
+        }
         document.getElementById('visitDate').value     = qrVisitDate.replace(/\//g, '-');
         document.getElementById('nextVisitDate').value = qrNextVisit.replace(/\//g, '-');
         calcVisit();
@@ -1369,11 +1374,17 @@ async function loadHospitals() {
   if (hospitalsLoaded) return;
   try {
     hospitals = await api('getHospitals');
-    var sel1 = document.getElementById('visitHospital');
+    // 病院・クリニック選択を検索付きセレクトに変換
+    var hospitalOptions = hospitals.map(function(h) {
+      return { value: h.hospitalId, label: h.hospitalName + '（' + h.facilityName + '）' };
+    });
+    createSearchSelect('visitHospitalSearchSelect', hospitalOptions, '', '病院・クリニックを検索...', function(value) {
+      document.getElementById('visitHospital').value = value;
+    });
+    // 往診予定フィルタはそのままselectに追加
     var sel2 = document.getElementById('planFilterHospital');
     hospitals.forEach(function(h) {
       var label = h.hospitalName + '（' + h.facilityName + '）';
-      sel1.innerHTML += '<option value="' + h.hospitalId + '">' + label + '</option>';
       sel2.innerHTML += '<option value="' + h.hospitalId + '">' + label + '</option>';
     });
     hospitalsLoaded = true;
@@ -1474,10 +1485,12 @@ function renderVisitResults(result) {
         ? '<span style="color:' + depColor + ';font-weight:700">' + m.currentDepletionDate + '（' + depLabel + '）</span>'
         : '<span style="color:#c62828;font-weight:700">在庫切れ</span>';
 
-      // 処方後の枯渇予定日
-      var afterDepStr = m.depletionDateAfter
-        ? '<span style="color:#1a6fbf;font-weight:700">' + m.depletionDateAfter + '</span>'
-        : '-';
+      // 処方後の枯渇予定日（0本の場合は「処方なし（変化なし）」）
+      var afterDepStr = (m.requiredBottles === 0)
+        ? '<span style="color:#9aa5b4">処方なし（変化なし）</span>'
+        : (m.depletionDateAfter
+          ? '<span style="color:#1a6fbf;font-weight:700">' + m.depletionDateAfter + '</span>'
+          : '-');
 
       // 薬品タイプ判定（注射フラグ）
       var isInjection = (m.medicineType === '注射' || m.medicineType === '注射薬');
@@ -1623,34 +1636,39 @@ function applyVisitBottleEdits() {
       // 処方後枯渇日の再計算（フロント側近似: 追加本数×容量を在庫に加算して日数を計算）
       var depAfterEl = document.getElementById('dep-after-' + pid);
       if (depAfterEl) {
-        var freq       = m.frequency || '';
-        var onceAmount = parseFloat(m.dailyAmount) || 0;
-        var capacity   = parseFloat(m.capacity) || 0;
-        var currentStock = parseFloat(m.currentStock) || 0;
-        var intervalDays = 1;
-        if      (freq === '毎日')  intervalDays = 1;
-        else if (freq === '週2回') intervalDays = 3.5;
-        else if (freq === '週1回') intervalDays = 7;
-        else if (freq === '月1回') intervalDays = 30;
-        else {
-          var wm = freq.match(/週(\d+)回/);
-          if (wm) intervalDays = 7 / parseInt(wm[1]);
+        // 0本の場合は処方なし（変化なし）
+        if (newBottles === 0) {
+          depAfterEl.innerHTML = '✅ 処方後: <span style="color:#9aa5b4">処方なし（変化なし）</span>'
+            + (changed ? ' <span style="font-size:10px;color:#e65100">（変更後）</span>' : '');
+        } else {
+          var freq       = m.frequency || '';
+          var onceAmount = parseFloat(m.dailyAmount) || 0;
+          var capacity   = parseFloat(m.capacity) || 0;
+          var currentStock = parseFloat(m.currentStock) || 0;
+          var intervalDays = 1;
+          if      (freq === '毎日')  intervalDays = 1;
+          else if (freq === '週2回') intervalDays = 3.5;
+          else if (freq === '週1回') intervalDays = 7;
+          else if (freq === '月1回') intervalDays = 30;
+          else {
+            var wm = freq.match(/週(\d+)回/);
+            if (wm) intervalDays = 7 / parseInt(wm[1]);
+          }
+          var totalStock = currentStock + newBottles * capacity;
+          var totalDays  = (onceAmount > 0 && intervalDays > 0)
+            ? Math.floor(totalStock / onceAmount * intervalDays)
+            : 0;
+          var newDepDate = '-';
+          if (totalDays > 0) {
+            var d = new Date();
+            d.setDate(d.getDate() + totalDays);
+            newDepDate = d.getFullYear() + '/'
+              + String(d.getMonth() + 1).padStart(2, '0') + '/'
+              + String(d.getDate()).padStart(2, '0');
+          }
+          depAfterEl.innerHTML = '✅ 処方後: <span style="color:#1a6fbf;font-weight:700">' + newDepDate + '</span>まで'
+            + (changed ? ' <span style="font-size:10px;color:#e65100">（変更後）</span>' : '');
         }
-        var totalStock  = currentStock + newBottles * capacity;
-        var daysPerBottle = (onceAmount > 0) ? (capacity / onceAmount * intervalDays) : 0;
-        var totalDays   = (onceAmount > 0 && intervalDays > 0)
-          ? Math.floor(totalStock / onceAmount * intervalDays)
-          : 0;
-        var newDepDate  = '-';
-        if (totalDays > 0) {
-          var d = new Date();
-          d.setDate(d.getDate() + totalDays);
-          newDepDate = d.getFullYear() + '/'
-            + String(d.getMonth() + 1).padStart(2, '0') + '/'
-            + String(d.getDate()).padStart(2, '0');
-        }
-        depAfterEl.innerHTML = '✅ 処方後: <span style="color:#1a6fbf;font-weight:700">' + newDepDate + '</span>まで'
-          + (changed ? ' <span style="font-size:10px;color:#e65100">（変更後）</span>' : '');
       }
     });
   });
@@ -1776,7 +1794,7 @@ function visitPrintPDF() {
         ? needlesTotal + '本（' + needlePacks + 'パック）'
         : (isInjection ? '-' : '対象外');
       var depBefore = m.currentDepletionDate || '在庫切れ';
-      var depAfter  = m.depletionDateAfter   || (bottles > 0 ? '-' : '処方なし');
+      var depAfter  = bottles === 0 ? '処方なし（変化なし）' : (m.depletionDateAfter || '-');
 
       // 枯渇日の色
       var depBeforeColor = '#333';
@@ -1971,9 +1989,11 @@ function renderVisitPlanDetailResult(result) {
       var currentDepStr = m.currentDepletionDate
         ? '<span style="color:' + depColor + ';font-weight:700">' + m.currentDepletionDate + '（' + depLabel + '）</span>'
         : '<span style="color:#c62828;font-weight:700">在庫切れ</span>';
-      var afterDepStr = m.depletionDateAfter
-        ? '<span style="color:#1a6fbf;font-weight:700">' + m.depletionDateAfter + '</span>'
-        : '-';
+      var afterDepStr = (m.requiredBottles === 0)
+        ? '<span style="color:#9aa5b4">処方なし（変化なし）</span>'
+        : (m.depletionDateAfter
+          ? '<span style="color:#1a6fbf;font-weight:700">' + m.depletionDateAfter + '</span>'
+          : '-');
 
       var isInjection = (m.medicineType === '注射' || m.medicineType === '注射薬');
       var freq = m.frequency || '';
@@ -2099,7 +2119,13 @@ var MASTER_DEF = {
       { key: '使用頻度',       label: '使用頻度（固定の場合）', type: 'select', required: false, options: ['', '毎日', '週2回', '週1回', '月1回'] },
       { key: '1日回数',        label: '1日回数（固定の場合）', type: 'number', required: false },
     ],
-    rowLabel: function(r) { return r['薬品名'] + '　' + (r['種類'] || '') + '  1本' + (r['1本容量'] || '-') + '単位 / 開封後' + (r['開封後有効日数'] >= 999 ? '期限なし' : (r['開封後有効日数'] || '-') + '日'); },
+    rowLabel: function(r) {
+      var base = r['薬品名'] + '　' + (r['種類'] || '') + '  1本' + (r['1本容量'] || '-') + '単位 / 開封後' + (parseInt(r['開封後有効日数']) >= 999 ? '期限なし' : (r['開封後有効日数'] || '-') + '日');
+      var extras = [];
+      if (r['使用頻度']) extras.push(r['使用頻度']);
+      if (r['1日回数'])  extras.push(r['1日回数'] + '回/日');
+      return extras.length ? base + ' / ' + extras.join('・') : base;
+    },
   },
   prescription: {
     label: '処方',
