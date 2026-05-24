@@ -1895,6 +1895,7 @@ function openBulkHistoryDetail(groupIdx) {
 
 function renderBulkHistoryDetail(g, groupIdx) {
   var logs = g.logs;
+  console.log('renderBulkHistoryDetail logs:', JSON.stringify(logs.map(function(l){ return {logId:l.logId, prescriptionId:l.prescriptionId, patientName:l.patientName, medicineName:l.medicineName}; })));
 
   // 共通写真
   var photoHtml = g.photoUrl
