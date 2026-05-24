@@ -322,7 +322,10 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
         <label>実施日</label>
         <input type="date" id="bulkDate">
       </div>
-      <button class="btn btn-primary btn-full" onclick="loadBulkStock()">一覧を読み込む</button>
+      <div style="display:flex;gap:8px;margin-top:0">
+        <button class="btn btn-primary" style="flex:1" onclick="loadBulkStock()">一覧を読み込む</button>
+        <button class="btn btn-outline" onclick="loadBulkLogHistory()" style="white-space:nowrap">📋 過去の記録</button>
+      </div>
     </div>
 
     <!-- 写真添付 -->
@@ -703,6 +706,28 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
       <button onclick="closeModal('historyModal')">&#215;</button>
     </div>
     <div id="historyContent"></div>
+  </div>
+</div>
+
+<!-- 一括残数履歴モーダル（日付一覧） -->
+<div class="modal-overlay" id="bulkHistoryListModal">
+  <div class="modal" style="max-height:85vh;display:flex;flex-direction:column">
+    <div class="modal-title" style="flex-shrink:0">
+      <span>過去の一括残数記録</span>
+      <button onclick="closeModal('bulkHistoryListModal')">&#215;</button>
+    </div>
+    <div id="bulkHistoryListContent" style="overflow-y:auto;flex:1"></div>
+  </div>
+</div>
+
+<!-- 一括残数履歴詳細モーダル（1回分のログ一覧・修正） -->
+<div class="modal-overlay" id="bulkHistoryDetailModal">
+  <div class="modal" style="max-height:90vh;display:flex;flex-direction:column">
+    <div class="modal-title" style="flex-shrink:0">
+      <span id="bulkHistoryDetailTitle">一括記録の詳細</span>
+      <button onclick="closeModal('bulkHistoryDetailModal')">&#215;</button>
+    </div>
+    <div id="bulkHistoryDetailContent" style="overflow-y:auto;flex:1;padding-bottom:8px"></div>
   </div>
 </div>
 
@@ -1807,13 +1832,191 @@ function clearBulkPhoto(event) {
   document.getElementById('bulkPhotoPreview').style.display = 'none';
 }
 
-// 一括残数ページから履歴を開く（既存のshowHistoryを再利用）
+// 一括残数ページから処方個別履歴を開く（既存のshowHistoryを再利用）
 function showBulkHistory(prescriptionId) {
-  // 履歴変更・削除後に一括リストを再読み込みするためフラグをセット
   _bulkHistoryPrescriptionId = prescriptionId;
   showHistory(prescriptionId);
 }
 var _bulkHistoryPrescriptionId = null;
+
+// ============================================================
+// 一括残数 過去の記録（日付グループ一覧）
+// ============================================================
+var _bulkHistoryGroups = []; // 読み込んだグループデータを保持
+
+async function loadBulkLogHistory() {
+  var hospitalId = document.getElementById('bulkHospitalId').value;
+  if (!hospitalId) { toast('先に病院を選択してください'); return; }
+
+  document.getElementById('bulkHistoryListContent').innerHTML =
+    '<div class="loading"><div class="spinner"></div>読み込み中...</div>';
+  openModal('bulkHistoryListModal');
+
+  try {
+    var groups = await api('getBulkLogHistory', { hospitalId: hospitalId });
+    _bulkHistoryGroups = groups;
+    renderBulkHistoryList(groups);
+  } catch(e) {
+    document.getElementById('bulkHistoryListContent').innerHTML =
+      '<div style="color:red;padding:16px">エラー: ' + e.message + '</div>';
+  }
+}
+
+function renderBulkHistoryList(groups) {
+  if (!groups || !groups.length) {
+    document.getElementById('bulkHistoryListContent').innerHTML =
+      '<div class="empty-state">過去の一括残数記録がありません</div>';
+    return;
+  }
+  var html = groups.map(function(g, idx) {
+    var photoIcon = g.photoUrl ? ' 📷' : '';
+    return '<div style="padding:12px 16px;border-bottom:1px solid var(--gray-200);cursor:pointer;active-opacity:.7"'
+      + ' onclick="openBulkHistoryDetail(' + idx + ')">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center">'
+      + '<div>'
+      + '<div style="font-weight:700;font-size:15px">' + escapeHtml(g.dateKey) + photoIcon + '</div>'
+      + '<div style="font-size:12px;color:#9aa5b4;margin-top:2px">' + g.logCount + '件の処方を記録</div>'
+      + '</div>'
+      + '<span style="font-size:14px;color:var(--primary)">›</span>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+  document.getElementById('bulkHistoryListContent').innerHTML = html;
+}
+
+function openBulkHistoryDetail(groupIdx) {
+  var g = _bulkHistoryGroups[groupIdx];
+  if (!g) return;
+  closeModal('bulkHistoryListModal');
+  document.getElementById('bulkHistoryDetailTitle').textContent = g.dateKey + ' の一括記録';
+  renderBulkHistoryDetail(g, groupIdx);
+  openModal('bulkHistoryDetailModal');
+}
+
+function renderBulkHistoryDetail(g, groupIdx) {
+  var logs = g.logs;
+
+  // 共通写真
+  var photoHtml = g.photoUrl
+    ? '<div style="margin-bottom:12px"><a href="' + g.photoUrl + '" target="_blank" rel="noopener"'
+      + ' style="display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:#1a6fbf;background:#e3f2fd;border:1px solid #90caf9;padding:7px 14px;border-radius:8px;text-decoration:none">'
+      + '📷 共通写真を開く（Googleドライブ）</a></div>'
+    : '';
+
+  var html = '<div style="padding:12px 16px 0">' + photoHtml;
+
+  // 患者ごとにグループ化して表示
+  var patientGroups = {};
+  logs.forEach(function(l) {
+    if (!patientGroups[l.patientId]) {
+      patientGroups[l.patientId] = { name: l.patientName, logs: [] };
+    }
+    patientGroups[l.patientId].logs.push(l);
+  });
+
+  Object.keys(patientGroups).forEach(function(pid) {
+    var pt = patientGroups[pid];
+    html += '<div style="margin-bottom:14px">'
+      + '<div style="font-weight:700;font-size:14px;color:var(--primary);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--gray-200)">'
+      + '👤 ' + escapeHtml(pt.name) + '</div>';
+
+    pt.logs.forEach(function(l) {
+      var lid = escapeJs(l.logId);
+      var cap = l.capacity || 1;
+      var stockBottles = cap > 0 ? (l.stockAfter / cap).toFixed(1) : '-';
+      html += '<div id="bulk-hist-row-' + lid + '" style="background:#f5f7fa;border-radius:8px;padding:10px 12px;margin-bottom:8px">'
+        // 薬品名 + 在庫
+        + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'
+        + '<div>'
+        + '<div style="font-size:13px;font-weight:600">' + escapeHtml(l.medicineName) + '</div>'
+        + '<div style="font-size:12px;color:#9aa5b4;margin-top:2px">確認在庫: <b>' + l.stockAfter.toFixed(1) + '単位</b>（' + stockBottles + '本）</div>'
+        + (l.memo ? '<div style="font-size:12px;color:#9aa5b4">備考: ' + escapeHtml(l.memo) + '</div>' : '')
+        + '</div>'
+        // 編集エリア（折り畳み）
+        + '<button class="btn btn-outline btn-sm" style="font-size:11px;padding:3px 9px;flex-shrink:0"'
+        + ' onclick="toggleBulkHistEdit(\'' + lid + '\',' + cap + ',' + l.stockAfter + ',' + groupIdx + ')">✏️ 修正</button>'
+        + '</div>'
+        // 編集フォーム（初期非表示）
+        + '<div id="bulk-hist-edit-' + lid + '" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid #e8ecf0">'
+        + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">'
+        + '<label style="font-size:12px;color:#9aa5b4;margin:0">確認本数（修正）</label>'
+        + '<input type="number" id="bulk-hist-input-' + lid + '" min="0" step="0.5" value="' + stockBottles + '"'
+        + ' style="width:80px;padding:6px 8px;font-size:15px;font-weight:700;text-align:center;border:2px solid var(--primary);border-radius:8px">'
+        + '<span style="font-size:13px">本</span>'
+        + '</div>'
+        + '<div style="display:flex;gap:6px">'
+        + '<button class="btn btn-primary btn-sm" onclick="saveBulkHistEdit(\'' + lid + '\',' + cap + ',' + groupIdx + ')">保存</button>'
+        + '<button class="btn btn-sm" style="background:#ffebee;color:#c62828;border:1px solid #ffcdd2" onclick="deleteBulkHistLog(\'' + lid + '\',' + groupIdx + ')">削除</button>'
+        + '<button class="btn btn-outline btn-sm" onclick="toggleBulkHistEdit(\'' + lid + '\',0,0,0)">キャンセル</button>'
+        + '</div>'
+        + '</div>'
+        + '</div>';
+    });
+
+    html += '</div>';
+  });
+
+  html += '</div>';
+  document.getElementById('bulkHistoryDetailContent').innerHTML = html;
+}
+
+function toggleBulkHistEdit(logId, capacity, currentStockAfter, groupIdx) {
+  var editEl = document.getElementById('bulk-hist-edit-' + logId);
+  if (!editEl) return;
+  var isOpen = editEl.style.display !== 'none';
+  editEl.style.display = isOpen ? 'none' : '';
+}
+
+async function saveBulkHistEdit(logId, capacity, groupIdx) {
+  var inp = document.getElementById('bulk-hist-input-' + logId);
+  if (!inp) return;
+  var bottles = parseFloat(inp.value);
+  if (isNaN(bottles) || bottles < 0) { toast('本数を正しく入力してください'); return; }
+  var stockUnits = bottles * capacity;
+
+  try {
+    await api('updateLog', null, { logId: logId, stockAfter: stockUnits });
+    toast('✓ 保存しました');
+    // グループを再読み込みして詳細を更新
+    await refreshBulkHistoryDetail(groupIdx);
+  } catch(e) {
+    toast('エラー: ' + e.message);
+  }
+}
+
+async function deleteBulkHistLog(logId, groupIdx) {
+  if (!confirm('この記録を削除しますか？')) return;
+  try {
+    await api('deleteLog', null, { logId: logId });
+    toast('✓ 削除しました');
+    await refreshBulkHistoryDetail(groupIdx);
+  } catch(e) {
+    toast('エラー: ' + e.message);
+  }
+}
+
+async function refreshBulkHistoryDetail(groupIdx) {
+  var hospitalId = document.getElementById('bulkHospitalId').value;
+  if (!hospitalId) return;
+  try {
+    var groups = await api('getBulkLogHistory', { hospitalId: hospitalId });
+    _bulkHistoryGroups = groups;
+    // 同じインデックスのグループが残っていれば再描画
+    var g = groups[groupIdx];
+    if (g) {
+      renderBulkHistoryDetail(g, groupIdx);
+    } else {
+      closeModal('bulkHistoryDetailModal');
+      openModal('bulkHistoryListModal');
+      renderBulkHistoryList(groups);
+    }
+    // 一括リスト（現在在庫表示）も更新
+    if (window._bulkPatients) {
+      var data = await api('getBulkStockData', { hospitalId: hospitalId });
+      renderBulkStockList(data);
+    }
+  } catch(e) { console.warn(e); }
+}
 
 async function submitBulkStock() {
   if (!window._bulkPatients || !window._bulkPatients.length) { toast('データがありません'); return; }
