@@ -79,6 +79,37 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
 .badge-danger  { background: #ffebee; color: var(--danger); }
 .badge-gray    { background: var(--gray-200); color: var(--gray-400); }
 .badge-blue    { background: #e3f2fd; color: var(--primary); }
+/* 検索付きセレクト */
+.search-select { position: relative; }
+.search-select-input {
+  width: 100%; padding: 10px 36px 10px 12px; border: 1.5px solid var(--gray-200);
+  border-radius: 8px; font-size: 15px; color: var(--gray-700); background: var(--white);
+  outline: none; transition: border-color .2s; box-sizing: border-box;
+}
+.search-select-input:focus { border-color: var(--primary); }
+.search-select-arrow {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  pointer-events: none; color: var(--gray-400); font-size: 14px;
+}
+.search-select-clear {
+  position: absolute; right: 30px; top: 50%; transform: translateY(-50%);
+  cursor: pointer; color: var(--gray-400); font-size: 16px; display: none;
+  background: none; border: none; padding: 0;
+}
+.search-select-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 200;
+  background: var(--white); border: 1.5px solid var(--primary); border-radius: 8px;
+  max-height: 220px; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,.15);
+  display: none;
+}
+.search-select-dropdown.open { display: block; }
+.search-select-option {
+  padding: 10px 14px; font-size: 14px; cursor: pointer; border-bottom: 1px solid #f0f0f0;
+}
+.search-select-option:last-child { border-bottom: none; }
+.search-select-option:hover, .search-select-option.focused { background: #e3f2fd; }
+.search-select-option.selected { background: #bbdefb; font-weight: 700; }
+.search-select-empty { padding: 12px 14px; font-size: 13px; color: var(--gray-400); }
 .patient-card {
   background: var(--white); border-radius: var(--radius); box-shadow: var(--shadow);
   margin: 8px 12px 0; padding: 14px 16px; cursor: pointer;
@@ -424,6 +455,22 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
       <label>備考（任意）</label>
       <textarea id="logMemo" rows="2" placeholder="メモ"></textarea>
     </div>
+    <div class="form-group">
+      <label>写真（任意）</label>
+      <div id="logPhotoArea" style="border:2px dashed var(--gray-200);border-radius:8px;padding:12px;text-align:center;cursor:pointer;transition:border-color .2s" onclick="document.getElementById('logPhotoInput').click()" ondragover="event.preventDefault();this.style.borderColor='var(--primary)'" ondragleave="this.style.borderColor='var(--gray-200)'" ondrop="onLogPhotoDrop(event)">
+        <input type="file" id="logPhotoInput" accept="image/*" capture="environment" style="display:none" onchange="onLogPhotoSelected(this)">
+        <div id="logPhotoPlaceholder" style="color:#9aa5b4;font-size:13px">
+          📷 タップして写真を撮影 / 選択<br><span style="font-size:11px">ドラッグ&ドロップも可</span>
+        </div>
+        <div id="logPhotoPreview" style="display:none">
+          <img id="logPhotoImg" style="max-width:100%;max-height:160px;border-radius:6px;object-fit:contain">
+          <div style="margin-top:6px;display:flex;justify-content:center;gap:8px">
+            <span style="font-size:12px;color:#2e7d32;font-weight:600">✓ 写真を選択済み</span>
+            <button onclick="clearLogPhoto(event)" style="font-size:11px;color:#c62828;background:none;border:none;cursor:pointer;padding:0">✕ 削除</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <button class="btn btn-primary btn-full" onclick="submitLog()">記録する</button>
   </div>
 </div>
@@ -439,7 +486,7 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
       <div style="font-size:13px;color:#9aa5b4;margin-bottom:8px">患者: <b id="addRxPatientName"></b></div>
       <div class="form-group">
         <label>薬品 *</label>
-        <select id="addRxMedicine"><option value="">選択してください</option></select>
+        <div id="addRxMedicine"></div>
       </div>
       <div class="form-group">
         <label>使用頻度 *</label>
@@ -873,6 +920,7 @@ function openLogModal(prescriptionId, action, medicineName, capacity) {
     hint.textContent = '';
   }
   onLogActionChange();
+  resetLogPhoto();
   openModal('logModal');
 }
 
@@ -882,6 +930,69 @@ function onLogActionChange() {
     var el = document.getElementById('logSection-' + a);
     if (el) el.style.display = (a === action) ? '' : 'none';
   });
+}
+
+// ============================================================
+// 写真アップロード
+// ============================================================
+var logPhotoBase64 = null; // 選択中の写真データ
+
+function onLogPhotoSelected(input) {
+  if (!input.files || !input.files[0]) return;
+  readPhotoFile(input.files[0]);
+}
+
+function onLogPhotoDrop(event) {
+  event.preventDefault();
+  document.getElementById('logPhotoArea').style.borderColor = 'var(--gray-200)';
+  var file = event.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) readPhotoFile(file);
+}
+
+function readPhotoFile(file) {
+  // リサイズして容量を抑える
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      var canvas = document.createElement('canvas');
+      var MAX = 1024;
+      var w = img.width, h = img.height;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else       { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      logPhotoBase64 = canvas.toDataURL('image/jpeg', 0.82);
+      document.getElementById('logPhotoImg').src = logPhotoBase64;
+      document.getElementById('logPhotoPlaceholder').style.display = 'none';
+      document.getElementById('logPhotoPreview').style.display = '';
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearLogPhoto(event) {
+  event.stopPropagation();
+  logPhotoBase64 = null;
+  document.getElementById('logPhotoInput').value = '';
+  document.getElementById('logPhotoImg').src = '';
+  document.getElementById('logPhotoPlaceholder').style.display = '';
+  document.getElementById('logPhotoPreview').style.display = 'none';
+}
+
+function resetLogPhoto() {
+  logPhotoBase64 = null;
+  var inp = document.getElementById('logPhotoInput');
+  if (inp) inp.value = '';
+  var img = document.getElementById('logPhotoImg');
+  if (img) img.src = '';
+  var ph = document.getElementById('logPhotoPlaceholder');
+  if (ph) ph.style.display = '';
+  var pv = document.getElementById('logPhotoPreview');
+  if (pv) pv.style.display = 'none';
 }
 
 function onStockBottlesInput() {
@@ -925,6 +1036,21 @@ async function submitLog() {
   }
 
   try {
+    // 写真がある場合はまずアップロードしてURLを取得
+    if (logPhotoBase64) {
+      try {
+        var photoRes = await api('uploadPhoto', null, {
+          base64: logPhotoBase64,
+          fileName: 'log_' + prescriptionId + '_' + Date.now() + '.jpg'
+        });
+        if (photoRes && photoRes.url) {
+          body.photoUrl = photoRes.url;
+        }
+      } catch(photoErr) {
+        console.warn('写真アップロード失敗:', photoErr);
+        // 写真失敗でもログ記録は続行
+      }
+    }
     await api('addLog', null, body);
     toast('✓ ' + action + 'を記録しました');
     closeModal('logModal');
@@ -974,6 +1100,7 @@ function renderHistory(logs) {
       + (l.newDailyAmount ? '<div style="font-size:13px">変更後使用量: <b>' + l.newDailyAmount + '</b>単位/回</div>' : '')
       + (l.depletionDate ? '<div style="font-size:13px;color:#9aa5b4">枯渇予定: ' + l.depletionDate + '</div>' : '')
       + (l.memo ? '<div style="font-size:13px;color:#9aa5b4;margin-top:2px">' + l.memo + '</div>' : '')
+      + (l.photoUrl ? '<div style="margin-top:6px"><a href="' + l.photoUrl + '" target="_blank" rel="noopener"><img src="' + l.photoUrl + '" alt="写真" style="max-width:100%;max-height:120px;border-radius:6px;border:1px solid #e8ecf0;object-fit:cover" onerror="this.parentElement.innerHTML=\'<span style=&quot;font-size:12px;color:#9aa5b4&quot;>📷 写真（<a href=&quot;' + l.photoUrl + '&quot; target=&quot;_blank&quot;>開く</a>）</span>\'"></a></div>' : '')
       + '<div style="display:flex;gap:6px;margin-top:6px">'
       + '<button class="btn btn-outline btn-sm" style="font-size:11px;padding:4px 10px" onclick="openEditLogModal(\'' + lid + '\')">変更</button>'
       + '<button class="btn btn-sm" style="font-size:11px;padding:4px 10px;background:#ffebee;color:#c62828;border:1px solid #ffcdd2" onclick="deleteLog(\'' + lid + '\')">削除</button>'
@@ -1065,25 +1192,26 @@ async function openAddPrescriptionModal() {
   document.getElementById('addRxAmount').value = '';
   document.getElementById('addRxFreq').value = '毎日';
   document.getElementById('addRxMemo').value = '';
-  // 薬品リストを読み込む
-  var sel = document.getElementById('addRxMedicine');
-  sel.innerHTML = '<option value="">読み込み中...</option>';
+  // 薬品リストを読み込んで検索セレクトを生成
+  document.getElementById('addRxMedicine').innerHTML = '<div style="color:#9aa5b4;font-size:13px;padding:8px">読み込み中...</div>';
   try {
     var medicines = masterCache['medicine'] || await loadMasterForSelect('medicine');
-    sel.innerHTML = '<option value="">薬品を選択してください</option>';
-    medicines.forEach(function(m) {
-      sel.innerHTML += '<option value="' + escapeHtml(m['薬品ID']) + '" data-cap="' + (m['1本容量']||'') + '">'
-        + escapeHtml(m['薬品名']) + (m['種類'] ? '（' + m['種類'] + '）' : '') + '</option>';
+    var medOptions = medicines.map(function(m) {
+      return {
+        value: m['薬品ID'],
+        label: m['薬品名'] + (m['種類'] ? '（' + m['種類'] + '）' : '')
+      };
     });
+    createSearchSelect('addRxMedicine', medOptions, '', '薬品名で検索...');
   } catch(e) {
-    sel.innerHTML = '<option value="">読み込み失敗</option>';
+    document.getElementById('addRxMedicine').innerHTML = '<div style="color:red;font-size:13px">読み込み失敗</div>';
   }
   openModal('addRxModal');
 }
 
 async function submitAddPrescription() {
   if (!currentPatient) return;
-  var medicineId = document.getElementById('addRxMedicine').value;
+  var medicineId = getSearchSelectValue('addRxMedicine');
   var freq       = document.getElementById('addRxFreq').value;
   var amount     = document.getElementById('addRxAmount').value;
   var stock      = document.getElementById('addRxStock').value;
@@ -1976,6 +2104,106 @@ function getMasterIdKey(type) {
 function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function escapeJs(s)   { return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 
+// ============================================================
+// 検索付きセレクト共通コンポーネント
+// ============================================================
+// options: [{value, label}]
+// onChange: function(value, label)
+function createSearchSelect(containerId, options, currentValue, placeholder) {
+  var container = document.getElementById(containerId);
+  if (!container) return;
+  placeholder = placeholder || '選択または入力して検索...';
+
+  // 現在の選択ラベルを探す
+  var selectedLabel = '';
+  var selectedValue = currentValue || '';
+  if (selectedValue) {
+    var found = options.find(function(o) { return String(o.value) === String(selectedValue); });
+    if (found) selectedLabel = found.label;
+  }
+
+  container.innerHTML =
+    '<div class="search-select" id="' + containerId + '_wrap">'
+    + '<input type="text" class="search-select-input" id="' + containerId + '_input"'
+    + ' placeholder="' + escapeHtml(placeholder) + '"'
+    + ' value="' + escapeHtml(selectedLabel) + '"'
+    + ' autocomplete="off" autocorrect="off" spellcheck="false">'
+    + '<button class="search-select-clear" id="' + containerId + '_clear" tabindex="-1">&#215;</button>'
+    + '<span class="search-select-arrow">&#9660;</span>'
+    + '<input type="hidden" id="' + containerId + '_value" value="' + escapeHtml(String(selectedValue)) + '">'
+    + '<div class="search-select-dropdown" id="' + containerId + '_dropdown"></div>'
+    + '</div>';
+
+  var inp    = document.getElementById(containerId + '_input');
+  var hidden = document.getElementById(containerId + '_value');
+  var drop   = document.getElementById(containerId + '_dropdown');
+  var clrBtn = document.getElementById(containerId + '_clear');
+
+  function renderOptions(query) {
+    var q = (query || '').toLowerCase();
+    var filtered = q
+      ? options.filter(function(o) { return o.label.toLowerCase().indexOf(q) >= 0; })
+      : options;
+    if (!filtered.length) {
+      drop.innerHTML = '<div class="search-select-empty">該当なし</div>';
+    } else {
+      drop.innerHTML = filtered.map(function(o) {
+        var isSel = String(o.value) === String(hidden.value);
+        return '<div class="search-select-option' + (isSel ? ' selected' : '') + '"'
+          + ' data-value="' + escapeHtml(String(o.value)) + '"'
+          + ' data-label="' + escapeHtml(o.label) + '">'
+          + escapeHtml(o.label)
+          + '</div>';
+      }).join('');
+    }
+    drop.classList.add('open');
+  }
+
+  function closeDropdown() {
+    drop.classList.remove('open');
+  }
+
+  function selectOption(value, label) {
+    hidden.value = value;
+    inp.value    = label;
+    clrBtn.style.display = value ? '' : 'none';
+    closeDropdown();
+  }
+
+  // イベント
+  inp.addEventListener('focus', function() { renderOptions(inp.value); });
+  inp.addEventListener('input', function() {
+    hidden.value = '';
+    clrBtn.style.display = 'none';
+    renderOptions(inp.value);
+  });
+  drop.addEventListener('mousedown', function(e) {
+    var opt = e.target.closest('.search-select-option');
+    if (opt) {
+      selectOption(opt.dataset.value, opt.dataset.label);
+    }
+  });
+  clrBtn.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    selectOption('', '');
+    inp.focus();
+    renderOptions('');
+  });
+  document.addEventListener('click', function(e) {
+    var wrap = document.getElementById(containerId + '_wrap');
+    if (wrap && !wrap.contains(e.target)) closeDropdown();
+  }, true);
+
+  // 初期表示
+  if (selectedValue) clrBtn.style.display = '';
+}
+
+// 検索セレクトの値を取得
+function getSearchSelectValue(containerId) {
+  var el = document.getElementById(containerId + '_value');
+  return el ? el.value : '';
+}
+
 async function openAddMasterModal() {
   currentMasterRecord = null;
   document.getElementById('masterModalTitle').textContent = MASTER_DEF[currentMasterTab].label + ' 新規追加';
@@ -2007,22 +2235,16 @@ async function renderMasterFields(type, record) {
     if (isReadonly) {
       var displayVal = f.readonly === 'always' && !record ? '（保存時に自動発行）' : escapeHtml(String(val));
       html += '<input type="text" value="' + displayVal + '" readonly style="background:#f5f7fa;color:#9aa5b4">';
+    } else if (f.type === 'select' && f.optionSource) {
+      // optionSourceは検索付きセレクト（後でJS初期化）
+      var ssId = 'mf_' + f.key;
+      html += '<div id="' + ssId + '_container" data-ss-source="' + f.optionSource + '" data-ss-val="' + escapeHtml(String(val)) + '"></div>';
     } else if (f.type === 'select') {
       html += '<select id="mf_' + f.key + '">';
       html += '<option value="">選択してください</option>';
       if (f.options) {
         f.options.forEach(function(o) {
           html += '<option value="' + escapeHtml(o) + '"' + (String(val) === o ? ' selected' : '') + '>' + escapeHtml(o) + '</option>';
-        });
-      } else if (f.optionSource) {
-        // キャッシュから選択肢を生成
-        var srcData = masterCache[f.optionSource] || await loadMasterForSelect(f.optionSource);
-        var srcDef  = MASTER_DEF[f.optionSource];
-        var srcIdKey = getMasterIdKey(f.optionSource);
-        srcData.forEach(function(s) {
-          var optLabel = srcDef.rowLabel(s, masterCache);
-          var optVal   = s[srcIdKey];
-          html += '<option value="' + escapeHtml(String(optVal)) + '"' + (String(val) === String(optVal) ? ' selected' : '') + '>' + escapeHtml(optLabel) + '</option>';
         });
       }
       html += '</select>';
@@ -2032,6 +2254,29 @@ async function renderMasterFields(type, record) {
     html += '</div>';
   }
   document.getElementById('masterModalFields').innerHTML = html;
+
+  // optionSource付きフィールドに検索セレクトを初期化
+  var containers = document.querySelectorAll('[data-ss-source]');
+  for (var ci = 0; ci < containers.length; ci++) {
+    var container = containers[ci];
+    var source  = container.dataset.ssSource;
+    var initVal = container.dataset.ssSval || container.dataset.ssVal || '';
+    var ssId    = container.id; // e.g. "mf_病院ID_container"
+    var fieldId = ssId.replace('_container', ''); // "mf_病院ID"
+    // containerにIDを与えてcreateSearchSelectを呼ぶ
+    container.id = fieldId + '_ss';
+    try {
+      var srcData2 = masterCache[source] || await loadMasterForSelect(source);
+      var srcDef2  = MASTER_DEF[source];
+      var srcIdKey2 = getMasterIdKey(source);
+      var opts2 = srcData2.map(function(s) {
+        return { value: String(s[srcIdKey2]), label: srcDef2.rowLabel(s, masterCache) };
+      });
+      createSearchSelect(fieldId + '_ss', opts2, initVal, '検索して選択...');
+    } catch(e2) {
+      container.innerHTML = '<div style="color:red;font-size:13px">読み込み失敗</div>';
+    }
+  }
 }
 
 async function loadMasterForSelect(type) {
@@ -2053,6 +2298,13 @@ async function saveMaster() {
     if (f.readonly === 'always') {
       if (currentMasterRecord) record[f.key] = currentMasterRecord[f.key] || '';
       // 新規の場合はrecordに含めない（GAS側で自動生成）
+      return;
+    }
+    // optionSourceフィールドは検索セレクトから値取得
+    if (f.optionSource) {
+      var ssVal = getSearchSelectValue('mf_' + f.key + '_ss');
+      if (f.required && !ssVal) { toast(f.label + ' は必須です'); valid = false; return; }
+      record[f.key] = ssVal;
       return;
     }
     var el = document.getElementById('mf_' + f.key);
