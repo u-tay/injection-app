@@ -1516,6 +1516,8 @@ async function submitEditLog() {
       var prescriptions = await api('getPrescriptions', { patientId: currentPatient.patientId });
       renderPatientDetail(currentPatient, prescriptions);
     }
+    // 一括残数ページが開いていれば在庫を再読み込み
+    refreshBulkStockIfOpen();
   } catch(e) {
     toast('エラー: ' + e.message);
   }
@@ -1535,9 +1537,23 @@ async function deleteLog(logId) {
       var prescriptions = await api('getPrescriptions', { patientId: currentPatient.patientId });
       renderPatientDetail(currentPatient, prescriptions);
     }
+    // 一括残数ページが開いていれば在庫を再読み込み
+    refreshBulkStockIfOpen();
   } catch(e) {
     toast('エラー: ' + e.message);
   }
+}
+
+// 一括残数ページが表示中かつデータがある場合に再読み込み
+async function refreshBulkStockIfOpen() {
+  var bulkPage = document.getElementById('page-bulk');
+  if (!bulkPage || !bulkPage.classList.contains('active')) return;
+  var hospitalId = document.getElementById('bulkHospitalId').value;
+  if (!hospitalId || !window._bulkPatients) return;
+  try {
+    var data = await api('getBulkStockData', { hospitalId: hospitalId });
+    renderBulkStockList(data);
+  } catch(e) { /* サイレントに失敗 */ }
 }
 
 // ============================================================
@@ -1685,14 +1701,17 @@ function renderBulkStockList(patients) {
       var rxid = escapeJs(rx.prescriptionId);
       var cap  = rx.capacity || 1;
 
-      html += '<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;last-child:border:none">'
-        + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">'
-        + '<div style="flex:1;min-width:0">'
+      html += '<div style="padding:8px 0;border-bottom:1px solid #f0f0f0">'
+        // 薬品名 + 履歴ボタン
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
         + '<div style="font-size:13px;font-weight:600">' + escapeHtml(rx.medicineName) + '</div>'
-        + '<div style="font-size:12px;color:#9aa5b4;margin-top:2px">'
+        + '<button class="btn btn-outline btn-sm" style="font-size:11px;padding:3px 9px" onclick="showBulkHistory(\'' + rxid + '\')">📋 履歴</button>'
+        + '</div>'
+        // 在庫情報 + 入力
+        + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'
+        + '<div style="font-size:12px;color:#9aa5b4">'
         + '現在在庫: <b>' + rx.stock.toFixed(1) + '単位</b>（約' + rx.stockBottles + '本）　'
         + '<span style="color:' + depColor + '">' + depText + '</span>'
-        + '</div>'
         + '</div>'
         + '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">'
         + '<label style="font-size:12px;color:#9aa5b4;margin:0">確認本数</label>'
@@ -1787,6 +1806,14 @@ function clearBulkPhoto(event) {
   document.getElementById('bulkPhotoPlaceholder').style.display = '';
   document.getElementById('bulkPhotoPreview').style.display = 'none';
 }
+
+// 一括残数ページから履歴を開く（既存のshowHistoryを再利用）
+function showBulkHistory(prescriptionId) {
+  // 履歴変更・削除後に一括リストを再読み込みするためフラグをセット
+  _bulkHistoryPrescriptionId = prescriptionId;
+  showHistory(prescriptionId);
+}
+var _bulkHistoryPrescriptionId = null;
 
 async function submitBulkStock() {
   if (!window._bulkPatients || !window._bulkPatients.length) { toast('データがありません'); return; }
