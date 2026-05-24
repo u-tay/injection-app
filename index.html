@@ -1132,10 +1132,15 @@ function renderHistory(logs) {
     if (l.stockAfter !== '' && l.stockAfter !== undefined && l.stockAfter !== null) {
       afterStr = '<div style="font-size:13px">確定在庫: <b>' + parseFloat(l.stockAfter).toFixed(1) + '</b> 単位</div>';
     }
+    // 入力時刻（HH:MM）を表示
+    var inputTime = '';
+    if (l.inputAt && l.inputAt.length > 10) {
+      inputTime = l.inputAt.slice(11, 16); // "YYYY/MM/DD HH:MM:SS" → "HH:MM"
+    }
     return '<div style="padding:12px 0;border-bottom:1px solid #e8ecf0;">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
       + '<span style="font-weight:700;font-size:14px;color:' + color + '">' + l.action + '</span>'
-      + '<span style="font-size:13px;color:#9aa5b4">' + (l.date || '') + '</span>'
+      + '<span style="font-size:13px;color:#9aa5b4">' + (l.date || '') + (inputTime ? '　' + inputTime : '') + '</span>'
       + '</div>'
       + (l.bottles ? '<div style="font-size:13px">受取本数: <b>' + l.bottles + '</b> 本</div>' : '')
       + beforeStr
