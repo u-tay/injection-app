@@ -415,12 +415,24 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
     </div>
     <div id="logSection-処方受取">
       <div class="form-group">
-        <label>受取本数</label>
-        <input type="number" id="logBottles" min="0" step="1" placeholder="例：2">
+        <label>次回処方予定日</label>
+        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+          <button type="button" class="btn btn-outline btn-sm" onclick="setLogNextVisitDays(14)">14日後</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="setLogNextVisitDays(21)">21日後</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="setLogNextVisitDays(28)">28日後</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="setLogNextVisitDays(35)">35日後</button>
+        </div>
+        <input type="date" id="logNextVisit" onchange="calcLogBottlesSuggestion()">
       </div>
       <div class="form-group">
-        <label>次回処方予定日（任意）</label>
-        <input type="date" id="logNextVisit">
+        <label>受取本数</label>
+        <input type="number" id="logBottles" min="0" step="1" placeholder="例：2" oninput="updateLogDepletionPreview()">
+        <div id="logBottlesHint" style="font-size:12px;color:#1a6fbf;margin-top:3px"></div>
+      </div>
+      <!-- 枯渇予定日プレビュー（横並び） -->
+      <div id="logDepletionPreview" style="display:none;background:#f5f7fa;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;gap:16px;flex-wrap:wrap">
+        <div>📦 現在の枯渇予定: <b id="logDepBefore" style="color:#e65100">-</b></div>
+        <div>✅ 処方後の枯渇予定: <b id="logDepAfter" style="color:#1a6fbf">-</b></div>
       </div>
     </div>
     <div id="logSection-残数確認" style="display:none">
@@ -943,12 +955,15 @@ function renderRxCard(p, stopped) {
   var curDailyAmt   = escapeJs(String(p.dailyAmount   || ''));
   var curDailyCount = escapeJs(String(p.dailyCount    || '1'));
   var curFreq       = escapeJs(String(p.frequency     || '毎日'));
+  // 受取ボタン用に在庫・枯渇日も渡す
+  var curStock      = escapeJs(String(p.stock !== undefined && p.stock !== null ? p.stock : ''));
+  var curDepDate    = escapeJs(String(p.effectiveDepletionDate || ''));
   var actions = stopped
     ? '<div class="rx-actions">'
       + '<button class="btn btn-outline btn-sm" onclick="showHistory(\'' + pid + '\')">📋 履歴</button>'
       + '</div>'
     : '<div class="rx-actions">'
-      + '<button class="btn btn-primary btn-sm" onclick="openLogModal(\'' + pid + '\',\'処方受取\',\'' + mname + '\',\'' + cap + '\')">受取</button>'
+      + '<button class="btn btn-primary btn-sm" onclick="openLogModal(\'' + pid + '\',\'処方受取\',\'' + mname + '\',\'' + cap + '\',\'' + curDailyAmt + '\',\'' + curDailyCount + '\',\'' + curFreq + '\',\'' + curStock + '\',\'' + curDepDate + '\')">受取</button>'
       + '<button class="btn btn-outline btn-sm" onclick="openLogModal(\'' + pid + '\',\'残数確認\',\'' + mname + '\',\'' + cap + '\')">残数</button>'
       + '<button class="btn btn-outline btn-sm" onclick="openLogModal(\'' + pid + '\',\'用量変更\',\'' + mname + '\',\'' + cap + '\',\'' + curDailyAmt + '\',\'' + curDailyCount + '\',\'' + curFreq + '\')">変更</button>'
       + '<button class="btn btn-outline btn-sm" onclick="showHistory(\'' + pid + '\')">履歴</button>'
@@ -975,7 +990,10 @@ function renderRxCard(p, stopped) {
 // ============================================================
 // ログ入力モーダル
 // ============================================================
-function openLogModal(prescriptionId, action, medicineName, capacity, curDailyAmount, curDailyCount, curFrequency) {
+// 処方受取自動計算用：現在の処方データを保持
+var _logRxData = {};
+
+function openLogModal(prescriptionId, action, medicineName, capacity, curDailyAmount, curDailyCount, curFrequency, curStock, curDepDate) {
   document.getElementById('logPrescriptionId').value = prescriptionId;
   document.getElementById('logModalTitle').textContent = medicineName;
   document.getElementById('logAction').value = action;
@@ -998,7 +1016,6 @@ function openLogModal(prescriptionId, action, medicineName, capacity, curDailyAm
     document.getElementById('logNewDailyCount').value  = curDailyCount  || '';
     var freqSel = document.getElementById('logNewFrequency');
     if (curFrequency && freqSel) {
-      // 一致する選択肢があればセット、なければ最初の選択肢のまま
       var matched = Array.from(freqSel.options).some(function(opt) { return opt.value === curFrequency; });
       freqSel.value = matched ? curFrequency : (freqSel.options[0] ? freqSel.options[0].value : '毎日');
     }
@@ -1006,9 +1023,126 @@ function openLogModal(prescriptionId, action, medicineName, capacity, curDailyAm
     document.getElementById('logNewDailyAmount').value = '';
     document.getElementById('logNewDailyCount').value  = '';
   }
+  // 処方受取の場合：自動計算データをセットして初期値を計算
+  if (action === '処方受取') {
+    _logRxData = {
+      capacity:     parseFloat(capacity)      || 0,
+      dailyAmount:  parseFloat(curDailyAmount) || 0,
+      dailyCount:   parseInt(curDailyCount)    || 1,
+      frequency:    curFrequency || '毎日',
+      currentStock: parseFloat(curStock)       || 0,
+      currentDepletionDate: curDepDate || '',
+    };
+    // 初期値: 次回処方予定日を14日後にセット
+    setLogNextVisitDays(14);
+    // 枯渇日プレビュー表示
+    var prev = document.getElementById('logDepletionPreview');
+    if (prev) prev.style.display = 'flex';
+    var depBefore = document.getElementById('logDepBefore');
+    if (depBefore) depBefore.textContent = _logRxData.currentDepletionDate || '-';
+  } else {
+    _logRxData = {};
+    var prev = document.getElementById('logDepletionPreview');
+    if (prev) prev.style.display = 'none';
+  }
   onLogActionChange();
   resetLogPhoto();
   openModal('logModal');
+}
+
+// 次回処方予定日を今日からN日後にセットして自動計算
+function setLogNextVisitDays(days) {
+  var base = new Date();
+  base.setHours(0, 0, 0, 0);
+  var next = new Date(base.getTime() + days * 86400000);
+  var nextStr = next.getFullYear() + '-' + pad(next.getMonth()+1) + '-' + pad(next.getDate());
+  document.getElementById('logNextVisit').value = nextStr;
+  calcLogBottlesSuggestion();
+}
+
+// 次回処方予定日から必要本数を自動計算してセット
+function calcLogBottlesSuggestion() {
+  if (!_logRxData.capacity) return;
+  var nextVisitStr = document.getElementById('logNextVisit').value;
+  if (!nextVisitStr) return;
+
+  var cap         = _logRxData.capacity;
+  var dailyAmount = _logRxData.dailyAmount;
+  var frequency   = _logRxData.frequency;
+  var curStock    = _logRxData.currentStock;
+
+  // 次回処方日+7日後まで在庫が持つ必要がある
+  var targetDate = new Date(nextVisitStr);
+  targetDate.setDate(targetDate.getDate() + 7);
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  var daysNeeded = Math.max(0, Math.floor((targetDate - today) / 86400000));
+
+  // 1日あたり使用量
+  var intervalDays = 1;
+  if      (frequency === '毎日')  intervalDays = 1;
+  else if (frequency === '週2回') intervalDays = 3.5;
+  else if (frequency === '週1回') intervalDays = 7;
+  else if (frequency === '月1回') intervalDays = 30;
+  else {
+    var wm = (frequency || '').match(/週(\d+)回/);
+    if (wm) intervalDays = 7 / parseInt(wm[1]);
+  }
+  var dailyUse = dailyAmount > 0 && intervalDays > 0 ? dailyAmount / intervalDays : 0;
+
+  var hint = document.getElementById('logBottlesHint');
+  if (dailyUse <= 0 || cap <= 0) {
+    if (hint) hint.textContent = '';
+    updateLogDepletionPreview();
+    return;
+  }
+
+  // 必要総単位 = 日数 × 1日使用量 - 現在在庫（不足分）
+  var totalUnitsNeeded = daysNeeded * dailyUse;
+  var unitsToAdd = Math.max(0, totalUnitsNeeded - curStock);
+  var bottlesNeeded = Math.ceil(unitsToAdd / cap);
+
+  document.getElementById('logBottles').value = bottlesNeeded;
+  if (hint) hint.textContent = '※ 目標日(' + formatDateShort(targetDate) + ')まで ' + daysNeeded + '日分 / 現在在庫' + curStock.toFixed(1) + '単位 → ' + bottlesNeeded + '本を自動計算';
+  updateLogDepletionPreview();
+}
+
+// 処方後の枯渇予定日をプレビュー更新
+function updateLogDepletionPreview() {
+  if (!_logRxData.capacity) return;
+  var bottles = parseFloat(document.getElementById('logBottles').value) || 0;
+  var cap     = _logRxData.capacity;
+  var dailyAmount = _logRxData.dailyAmount;
+  var frequency   = _logRxData.frequency;
+  var curStock    = _logRxData.currentStock;
+
+  var intervalDays = 1;
+  if      (frequency === '毎日')  intervalDays = 1;
+  else if (frequency === '週2回') intervalDays = 3.5;
+  else if (frequency === '週1回') intervalDays = 7;
+  else if (frequency === '月1回') intervalDays = 30;
+  else {
+    var wm = (frequency || '').match(/週(\d+)回/);
+    if (wm) intervalDays = 7 / parseInt(wm[1]);
+  }
+  var dailyUse = dailyAmount > 0 && intervalDays > 0 ? dailyAmount / intervalDays : 0;
+
+  var depAfterEl = document.getElementById('logDepAfter');
+  if (!depAfterEl) return;
+
+  if (dailyUse <= 0) {
+    depAfterEl.textContent = '-';
+    return;
+  }
+  var totalStock = curStock + bottles * cap;
+  var daysLeft   = totalStock / dailyUse;
+  var depDate    = new Date();
+  depDate.setDate(depDate.getDate() + Math.floor(daysLeft));
+  depAfterEl.textContent = formatDateShort(depDate);
+}
+
+function formatDateShort(d) {
+  return d.getFullYear() + '/' + pad(d.getMonth()+1) + '/' + pad(d.getDate());
 }
 
 function onLogActionChange() {
