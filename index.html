@@ -926,7 +926,7 @@ function renderAlertBanner(data) {
     html += '<div class="alert-section-body">';
     dangers.forEach(function(a) {
       var sub = (a.facilityName || a.hospitalName || '') + (a.facilityName ? '' : '');
-      html += '<div class="alert-item" onclick="showPage(\'patient\');loadPatient(\'' + escapeJs(a.patientId) + '\')">';
+      html += '<div class="alert-item" onclick="openPatient(\'' + escapeJs(a.patientId) + '\')">';
       html += '<div class="alert-item-main">';
       html += '<div class="alert-item-name">' + escHtml(a.patientName) + ' <span style="font-size:12px;font-weight:400;color:var(--gray-400)">' + escHtml(a.medicineName) + '</span></div>';
       if (sub) html += '<div class="alert-item-sub">' + escHtml(sub) + '</div>';
@@ -947,7 +947,7 @@ function renderAlertBanner(data) {
     html += '<div class="alert-section-body">';
     warnings.forEach(function(a) {
       var sub = a.facilityName || a.hospitalName || '';
-      html += '<div class="alert-item" onclick="showPage(\'patient\');loadPatient(\'' + escapeJs(a.patientId) + '\')">';
+      html += '<div class="alert-item" onclick="openPatient(\'' + escapeJs(a.patientId) + '\')">';
       html += '<div class="alert-item-main">';
       html += '<div class="alert-item-name">' + escHtml(a.patientName) + ' <span style="font-size:12px;font-weight:400;color:var(--gray-400)">' + escHtml(a.medicineName) + '</span></div>';
       if (sub) html += '<div class="alert-item-sub">' + escHtml(sub) + '</div>';
@@ -969,7 +969,7 @@ function renderAlertBanner(data) {
     issues.forEach(function(issue) {
       // patientIdがあればタップで患者ページへ遷移
       var clickAttr = (issue.patientId && issue.patientId !== '不明')
-        ? 'onclick="showPage(\'patient\');loadPatient(\'' + escapeJs(issue.patientId) + '\')" style="cursor:pointer"'
+        ? 'onclick="openPatient(\'' + escapeJs(issue.patientId) + '\')" style="cursor:pointer"'
         : 'style="cursor:default"';
       html += '<div class="alert-item" ' + clickAttr + '>';
       html += '<div class="alert-item-main">';
