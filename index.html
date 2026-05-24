@@ -1304,16 +1304,36 @@ function renderRxCard(p, stopped) {
   var barColor = days <= 7 ? '#c62828' : days <= 14 ? '#e65100' : '#2e7d32';
   var stockUnit = (p.stock !== null && p.stock !== undefined) ? parseFloat(p.stock).toFixed(1) : '-';
 
-  var expireWarn = '';
-  if (p.openExpireDate && p.openExpireDate !== p.depletionDate && p.openExpireDate !== p.effectiveDepletionDate) {
-    expireWarn = '<div class="rx-row"><span class="rx-label">開封期限</span><span class="depletion-warn">' + p.openExpireDate + '</span></div>';
-  }
+  var depClass2 = days !== null && days !== undefined && days <= 7 ? 'depletion-soon' : (days !== null && days !== undefined && days <= 14 ? 'depletion-warn' : '');
 
-  var depClass2 = days <= 7 ? 'depletion-soon' : days <= 14 ? 'depletion-warn' : '';
-
+  // 枯渇予定日の行（補足説明付き）
   var cap = escapeJs(String(p.capacity || ''));
   var mname = p.medicineName.replace(/'/g,"");
   var pid = escapeJs(p.prescriptionId);
+
+  // 消費ベース枯渇日（開封期限無視）
+  var consumeDepDate = p.consumeDepletionDate || p.effectiveDepletionDate || '-';
+  // 開封期限（複数本加味）
+  var hasExpire = p.expireDays && p.expireDays < 999 && p.openExpireDate;
+  var expireInfo = '';
+  if (hasExpire) {
+    var expireClass = '';
+    if (p.openExpireDate && p.openExpireDate !== '-') {
+      var expDays = Math.floor((new Date(p.openExpireDate.replace(/\//g,'-')) - new Date()) / 86400000);
+      expireClass = expDays <= 14 ? 'depletion-soon' : expDays <= 30 ? 'depletion-warn' : '';
+    }
+    var totalExpInfo = (p.totalExpireDays != null)
+      ? ' <span style="font-size:11px;color:var(--gray-400)">（全在庫: 残' + p.totalExpireDays + '日分）</span>'
+      : '';
+    expireInfo = '<div class="rx-row" style="flex-direction:column;align-items:flex-start;gap:2px">'
+      + '<div style="display:flex;justify-content:space-between;width:100%">'
+      + '<span class="rx-label">開封期限' + totalExpInfo + '</span>'
+      + '<span class="' + expireClass + '">' + p.openExpireDate + '</span>'
+      + '</div>'
+      + '<div style="font-size:11px;color:var(--gray-400);padding-left:2px">使い切る前に期限が来る場合の上限日（全ボトル加味）</div>'
+      + '</div>';
+  }
+
   // 用量変更ボタン用に現在の処方値を文字列で渡す
   var curDailyAmt   = escapeJs(String(p.dailyAmount   || ''));
   var curDailyCount = escapeJs(String(p.dailyCount    || '1'));
@@ -1321,7 +1341,6 @@ function renderRxCard(p, stopped) {
   // 受取ボタン用に在庫・枯渇日も渡す
   var curStock      = escapeJs(String(p.stock !== undefined && p.stock !== null ? p.stock : ''));
   var curDepDate    = escapeJs(String(p.effectiveDepletionDate || ''));
-  var skipCheck     = p.skipIntegrityCheck ? 'true' : 'false';
   var actions = stopped
     ? '<div class="rx-actions">'
       + '<button class="btn btn-outline btn-sm" onclick="showHistory(\'' + pid + '\')">📋 履歴</button>'
@@ -1352,8 +1371,14 @@ function renderRxCard(p, stopped) {
     + '<div class="rx-row"><span class="rx-label">使用頻度</span><span>' + (p.frequency || '-') + '</span></div>'
     + '<div class="rx-row"><span class="rx-label">1日回数</span><span>' + (p.dailyCount || 1) + ' 回/日</span></div>'
     + '<div class="rx-row"><span class="rx-label">1回使用量</span><span>' + (p.dailyAmount || '-') + ' 単位</span></div>'
-    + '<div class="rx-row"><span class="rx-label">枯渇予定日</span><span class="' + depClass2 + '">' + (p.effectiveDepletionDate || '-') + '</span></div>'
-    + expireWarn
+    + '<div class="rx-row" style="flex-direction:column;align-items:flex-start;gap:2px">'
+    +   '<div style="display:flex;justify-content:space-between;width:100%">'
+    +     '<span class="rx-label">枯渇予定日</span>'
+    +     '<span class="' + depClass2 + '">' + (consumeDepDate) + '</span>'
+    +   '</div>'
+    +   '<div style="font-size:11px;color:var(--gray-400);padding-left:2px">開封期限を無視して現在在庫を使い切る日</div>'
+    + '</div>'
+    + expireInfo
     + skipToggle
     + '</div>'
     + actions
