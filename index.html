@@ -1374,36 +1374,23 @@ function renderRxCard(p, stopped) {
 
   var depClass2 = days !== null && days !== undefined && days <= 7 ? 'depletion-soon' : (days !== null && days !== undefined && days <= 14 ? 'depletion-warn' : '');
 
-  // 枯渇予定日の行（補足説明付き）
   var cap = escapeJs(String(p.capacity || ''));
   var mname = p.medicineName.replace(/'/g,"");
   var pid = escapeJs(p.prescriptionId);
 
-  // 消費ベース枯渇日（開封期限無視）
-  var consumeDepDate = p.consumeDepletionDate || p.effectiveDepletionDate || '-';
-  // 開封期限（複数本加味）
-  var hasExpire = p.expireDays && p.expireDays < 999 && p.openExpireDate;
-  var expireInfo = '';
-  if (hasExpire) {
-    var expireClass = '';
-    if (p.openExpireDate && p.openExpireDate !== '-') {
-      var expDays = Math.floor((new Date(p.openExpireDate.replace(/\//g,'-')) - new Date()) / 86400000);
-      expireClass = expDays <= 14 ? 'depletion-soon' : expDays <= 30 ? 'depletion-warn' : '';
-    }
-    var totalExpInfo = (p.totalExpireDays != null)
-      ? ' <span style="font-size:11px;color:var(--gray-400)">（全在庫: 残' + p.totalExpireDays + '日分）</span>'
-      : '';
-    // 開封日・開封後日数の補足（GASから渡される）
-    var openExpireSubNote = p.openExpireNote
-      ? escHtml(p.openExpireNote)
-      : '使い切る前に期限が来る場合の上限日（全ボトル加味）';
-    expireInfo = '<div class="rx-row" style="flex-direction:column;align-items:flex-start;gap:2px">'
-      + '<div style="display:flex;justify-content:space-between;width:100%">'
-      + '<span class="rx-label">開封期限' + totalExpInfo + '</span>'
-      + '<span class="' + expireClass + '">' + p.openExpireDate + '</span>'
-      + '</div>'
-      + '<div style="font-size:11px;color:var(--gray-400);padding-left:2px">' + openExpireSubNote + '</div>'
-      + '</div>';
+  // 枯渇予定日: 最終ログの値（開封期限加味済み）
+  var depDate = p.depletionDate || p.effectiveDepletionDate || '-';
+
+  // 開封後有効日数の表示（マスタ登録値を常に表示）
+  var expireDaysInfo = '';
+  if (p.expireDays && p.expireDays < 9999) {
+    expireDaysInfo = '<div class="rx-row"><span class="rx-label">開封後有効日数</span><span>' + p.expireDays + ' 日</span></div>';
+  }
+
+  // 枯渇予定日の注記: 開封期限が先に来ている場合のみ注記を付ける
+  var depDateNote = '';
+  if (p.openExpireLimitedBy) {
+    depDateNote = '<div style="font-size:11px;color:var(--gray-500);padding-left:2px">※開封後期限により制限</div>';
   }
 
   // 用量変更ボタン用に現在の処方値を文字列で渡す
@@ -1447,16 +1434,15 @@ function renderRxCard(p, stopped) {
     +   (p.lastLogDate ? '<div style="font-size:11px;color:var(--gray-400);padding-left:2px">' + escHtml(p.lastLogDate) + ' 確認分から日割り計算</div>' : '')
     + '</div>'
     + '<div class="rx-row"><span class="rx-label">使用頻度</span><span>' + (p.frequency || '-') + '</span></div>'
-    + '<div class="rx-row"><span class="rx-label">1日回数</span><span>' + (p.dailyCount || 1) + ' 回/日</span></div>'
-    + '<div class="rx-row"><span class="rx-label">1回使用量</span><span>' + (p.dailyAmount || '-') + ' 単位</span></div>'
+    + '<div class="rx-row"><span class="rx-label">1日使用量</span><span>' + (p.dailyAmount || '-') + ' 単位/日</span></div>'
+    + expireDaysInfo
     + '<div class="rx-row" style="flex-direction:column;align-items:flex-start;gap:2px">'
     +   '<div style="display:flex;justify-content:space-between;width:100%">'
     +     '<span class="rx-label">枯渇予定日</span>'
-    +     '<span class="' + depClass2 + '">' + (consumeDepDate) + '</span>'
+    +     '<span class="' + depClass2 + '">' + depDate + '</span>'
     +   '</div>'
-    +   '<div style="font-size:11px;color:var(--gray-400);padding-left:2px">最終ログ時点の枯渇予定日（変動しません）</div>'
+    +   depDateNote
     + '</div>'
-    + expireInfo
     + skipToggle
     + '</div>'
     + actions
