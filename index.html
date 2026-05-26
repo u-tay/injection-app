@@ -1381,10 +1381,28 @@ function renderRxCard(p, stopped) {
   // 枯渇予定日: 最終ログの値（開封期限加味済み）
   var depDate = p.depletionDate || p.effectiveDepletionDate || '-';
 
-  // 開封後有効日数の表示（マスタ登録値を常に表示）
+  // 1日使用回数
+  var dailyCountInfo = (p.dailyCount && p.dailyCount > 0)
+    ? '<div class="rx-row"><span class="rx-label">1日使用回数</span><span>' + p.dailyCount + ' 回/日</span></div>'
+    : '';
+
+  // 1本あたりの日数（1本容量 ÷ 1日使用量）
+  var daysPerBottleInfo = '';
+  if (p.capacity && p.dailyAmount && p.dailyAmount > 0) {
+    var daysPerBottle = Math.floor(p.capacity / p.dailyAmount * 10) / 10;
+    daysPerBottleInfo = '<div class="rx-row"><span class="rx-label">1本あたりの日数</span><span>' + daysPerBottle + ' 日/本</span></div>';
+  }
+
+  // 開封後有効日数の表示（1本あたり日数より短い場合は赤色）
   var expireDaysInfo = '';
   if (p.expireDays && p.expireDays < 9999) {
-    expireDaysInfo = '<div class="rx-row"><span class="rx-label">開封後有効日数</span><span>' + p.expireDays + ' 日</span></div>';
+    var daysPerBottleVal = (p.capacity && p.dailyAmount && p.dailyAmount > 0)
+      ? p.capacity / p.dailyAmount
+      : null;
+    var expireStyle = (daysPerBottleVal !== null && p.expireDays < daysPerBottleVal)
+      ? 'color:var(--danger);font-weight:700'
+      : '';
+    expireDaysInfo = '<div class="rx-row"><span class="rx-label">開封後有効日数</span><span style="' + expireStyle + '">' + p.expireDays + ' 日</span></div>';
   }
 
   // 枯渇予定日の注記: 開封期限が先に来ている場合のみ注記を付ける
@@ -1433,7 +1451,9 @@ function renderRxCard(p, stopped) {
     +   (p.lastLogDate ? '<div style="font-size:11px;color:var(--gray-400);padding-left:2px">' + escHtml(p.lastLogDate) + ' 確認分から日割り計算</div>' : '')
     + '</div>'
     + '<div class="rx-row"><span class="rx-label">使用頻度</span><span>' + (p.frequency || '-') + '</span></div>'
+    + dailyCountInfo
     + '<div class="rx-row"><span class="rx-label">1日使用量</span><span>' + (p.dailyAmount || '-') + ' 単位/日</span></div>'
+    + daysPerBottleInfo
     + expireDaysInfo
     + '<div class="rx-row">'
     +   '<span class="rx-label">枯渇予定日</span>'
