@@ -1388,10 +1388,9 @@ function renderRxCard(p, stopped) {
   }
 
   // 枯渇予定日の注記: 開封期限が先に来ている場合のみ注記を付ける
-  var depDateNote = '';
-  if (p.openExpireLimitedBy) {
-    depDateNote = '<div style="font-size:11px;color:var(--gray-500);padding-left:2px">※開封後期限により制限</div>';
-  }
+  var openExpireNote = p.openExpireLimitedBy
+    ? '<span style="font-size:11px;color:var(--warning);margin-left:6px;font-weight:600">（開封後期限を反映）</span>'
+    : '';
 
   // 用量変更ボタン用に現在の処方値を文字列で渡す
   var curDailyAmt   = escapeJs(String(p.dailyAmount   || ''));
@@ -1436,12 +1435,12 @@ function renderRxCard(p, stopped) {
     + '<div class="rx-row"><span class="rx-label">使用頻度</span><span>' + (p.frequency || '-') + '</span></div>'
     + '<div class="rx-row"><span class="rx-label">1日使用量</span><span>' + (p.dailyAmount || '-') + ' 単位/日</span></div>'
     + expireDaysInfo
-    + '<div class="rx-row" style="flex-direction:column;align-items:flex-start;gap:2px">'
-    +   '<div style="display:flex;justify-content:space-between;width:100%">'
-    +     '<span class="rx-label">枯渇予定日</span>'
+    + '<div class="rx-row">'
+    +   '<span class="rx-label">枯渇予定日</span>'
+    +   '<span style="display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:2px">'
     +     '<span class="' + depClass2 + '">' + depDate + '</span>'
-    +   '</div>'
-    +   depDateNote
+    +     openExpireNote
+    +   '</span>'
     + '</div>'
     + skipToggle
     + '</div>'
