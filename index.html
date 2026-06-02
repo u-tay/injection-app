@@ -1081,6 +1081,7 @@ async function api(action, params, body) {
   const url = new URL(GAS_URL);
   url.searchParams.set('action', action);
   url.searchParams.set('pin', getPin());  // 認証用PIN（GET/POST共通でクエリに付与）
+  url.searchParams.set('_', Date.now());  // キャッシュ無効化（GASのGET応答が古いまま返る問題対策）
   Object.keys(params).forEach(function(k) { url.searchParams.set(k, params[k]); });
 
   // 写真アップロードなど大きなデータはPOSTで送る
@@ -1102,11 +1103,12 @@ async function api(action, params, body) {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formBody,
+      cache: 'no-store',
     });
   } else {
     // 通常のGETパラメータ方式
     if (bodyStr) url.searchParams.set('payload', bodyStr);
-    res = await fetch(url.toString(), { method: 'GET' });
+    res = await fetch(url.toString(), { method: 'GET', cache: 'no-store' });
   }
 
   const data = await res.json();
