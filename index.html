@@ -494,16 +494,15 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
 <!-- 初期セットアップオーバーレイ -->
 <div class="setup-overlay" id="setupOverlay">
   <div class="setup-box">
-    <h2>🏥 初期設定</h2>
-    <p>使い始める前に、Google Apps ScriptのWeb App URLを設定してください。</p>
+    <h2>🔒 ログイン</h2>
+    <p>このアプリを使うにはPINを入力してください。</p>
     <div class="form-group">
-      <label>GAS Web App URL</label>
-      <input type="url" id="setupGasUrl" placeholder="https://script.google.com/macros/s/..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="font-size:14px">
+      <label>PIN</label>
+      <input type="password" id="setupPin" inputmode="numeric" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="font-size:16px" onkeydown="if(event.key==='Enter')savePinFromSetup()">
     </div>
-    <button class="btn btn-primary btn-full" onclick="saveGasUrlFromSetup()" style="margin-bottom:12px">保存して開始する</button>
+    <button class="btn btn-primary btn-full" onclick="savePinFromSetup()" style="margin-bottom:12px">ログイン</button>
     <div style="background:#fff8e1;border-radius:8px;padding:12px;font-size:12px;line-height:1.7">
-      <b>URLの確認方法：</b><br>
-      GASエディタ →「デプロイ」→「デプロイを管理」→ ウェブアプリのURLをコピー
+      PINは管理者が設定したものを入力してください。一度入力すれば、次回からは自動でログインします。
     </div>
   </div>
 </div>
@@ -805,10 +804,17 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-400
 // ============================================================
 // GAS URL 管理（localStorage で永続化）
 // ============================================================
-var GAS_URL = localStorage.getItem('gasUrl') || '';
+// GAS Web App の /exec URL をここに埋め込む（初回のURL入力を不要にする）
+var DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbzRMldbcdPpJaT23tp0ji-goOqaPPQ9FTmnUUH1IDHqNdpz2nj_Lg7qbSmOJJkrapZy/exec';
+var GAS_URL = localStorage.getItem('gasUrl') || DEFAULT_GAS_URL;
 
 function getGasUrl() {
-  return localStorage.getItem('gasUrl') || '';
+  return localStorage.getItem('gasUrl') || DEFAULT_GAS_URL;
+}
+
+// PIN（公開ページからの不正アクセス防止。コードには保存せずGAS側で照合）
+function getPin() {
+  return localStorage.getItem('appPin') || '';
 }
 
 function saveGasUrl() {
@@ -823,17 +829,20 @@ function saveGasUrl() {
   toast('URLを保存しました ✓', 2000);
 }
 
-function saveGasUrlFromSetup() {
-  var val = document.getElementById('setupGasUrl').value.trim();
-  if (!val || !val.startsWith('https://')) {
-    toast('正しいURLを入力してください（https://...）');
-    return;
+async function savePinFromSetup() {
+  var val = (document.getElementById('setupPin').value || '').trim();
+  if (!val) { toast('PINを入力してください'); return; }
+  localStorage.setItem('appPin', val);
+  try {
+    await api('ping');  // PINが正しいか検証
+    document.getElementById('setupOverlay').classList.remove('open');
+    toast('ログインしました ✓', 2000);
+    loadAllPatients();
+    loadAlerts();
+  } catch(e) {
+    localStorage.removeItem('appPin');
+    toast(e.message || 'PINが正しくありません');
   }
-  localStorage.setItem('gasUrl', val);
-  GAS_URL = val;
-  document.getElementById('setupOverlay').classList.remove('open');
-  updateUrlDisplay();
-  toast('設定を保存しました ✓ アプリを使い始めましょう！', 3000);
 }
 
 function clearGasUrl() {
@@ -1071,6 +1080,7 @@ async function api(action, params, body) {
   params = params || {};
   const url = new URL(GAS_URL);
   url.searchParams.set('action', action);
+  url.searchParams.set('pin', getPin());  // 認証用PIN（GET/POST共通でクエリに付与）
   Object.keys(params).forEach(function(k) { url.searchParams.set(k, params[k]); });
 
   // 写真アップロードなど大きなデータはPOSTで送る
@@ -1100,6 +1110,12 @@ async function api(action, params, body) {
   }
 
   const data = await res.json();
+  if (data && data.error === 'unauthorized') {
+    localStorage.removeItem('appPin');
+    var ov = document.getElementById('setupOverlay');
+    if (ov) ov.classList.add('open');
+    throw new Error('PINが正しくありません。再入力してください。');
+  }
   if (data && data.error) throw new Error(data.error);
   return data;
 }
@@ -1125,7 +1141,7 @@ function showPage(page) {
 // 起動時: URLが未設定ならセットアップ画面を表示
 // QRコードからのアクセス時: URLパラメータがあれば往診計算を自動実行
 window.addEventListener('DOMContentLoaded', function() {
-  if (!getGasUrl()) {
+  if (!getPin()) {
     document.getElementById('setupOverlay').classList.add('open');
   } else {
     updateUrlDisplay();
